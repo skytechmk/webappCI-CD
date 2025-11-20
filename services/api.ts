@@ -36,6 +36,13 @@ export const api = {
     fetchEvents: async (userId?: string): Promise<Event[]> => {
         const url = userId ? `${API_URL}/api/events?userId=${encodeURIComponent(userId)}` : `${API_URL}/api/events`;
         const res = await fetch(url);
+        
+        if (!res.ok) {
+            // If there's an error (like "User ID required"), return empty array
+            // This prevents showing cached data when the API fails
+            return [];
+        }
+        
         const data = await res.json();
         // Normalize boolean/number conversions from SQLite
         return data.map((e: any) => ({
@@ -45,6 +52,23 @@ export const api = {
                 isWatermarked: !!m.isWatermarked
             }))
         }));
+    },
+    fetchEventById: async (eventId: string): Promise<Event> => {
+        const res = await fetch(`${API_URL}/api/events/${eventId}`);
+        
+        if (!res.ok) {
+            throw new Error(`Failed to fetch event: ${res.status} ${res.statusText}`);
+        }
+        
+        const data = await res.json();
+        // Normalize boolean/number conversions from SQLite
+        return {
+            ...data,
+            media: data.media.map((m: any) => ({
+                ...m,
+                isWatermarked: !!m.isWatermarked
+            }))
+        };
     },
     validateEventPin: async (id: string, pin: string): Promise<boolean> => {
         const res = await fetch(`${API_URL}/api/events/${id}/validate-pin`, {
@@ -115,5 +139,17 @@ export const api = {
     },
     deleteMedia: async (id: string): Promise<void> => {
         await fetch(`${API_URL}/api/media/${id}`, { method: 'DELETE' });
+    },
+    bulkDeleteMedia: async (mediaIds: string[]): Promise<{ success: boolean; deletedCount: number }> => {
+        const res = await fetch(`${API_URL}/api/media/bulk-delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mediaIds })
+        });
+        const data = await res.json();
+        return {
+            success: data.success || false,
+            deletedCount: data.deletedCount || 0
+        };
     }
 };

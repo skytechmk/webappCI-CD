@@ -351,7 +351,7 @@ app.delete('/api/users/:id', (req, res) => {
     });
 });
 
-// Events
+// Events - Get events for authenticated users
 app.get('/api/events', (req, res) => {
     // Get user ID from query parameter for access control
     const userId = req.query.userId;
@@ -369,7 +369,7 @@ app.get('/api/events', (req, res) => {
         let params = [];
 
         // Admin users can see all events
-        if (user.role !== 'admin') {
+        if (user.role !== 'ADMIN') {
             // Regular users can only see their own events and events they've been invited to via shared links
             // For now, we'll only show events they own. Shared events are handled via direct links.
             query = "SELECT * FROM events WHERE hostId = ?";
@@ -410,6 +410,43 @@ app.get('/api/events', (req, res) => {
                 res.status(500).json({ error: 'Failed to retrieve event data from storage.' });
             }
         });
+    });
+});
+
+// Events - Get specific event for shared links (no authentication required)
+app.get('/api/events/:id', (req, res) => {
+    const eventId = req.params.id;
+    
+    db.get("SELECT * FROM events WHERE id = ?", [eventId], async (err, event) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+
+        try {
+            // Resolve Media
+            const media = await new Promise((resolve) => {
+                db.all("SELECT * FROM media WHERE eventId = ? ORDER BY uploadedAt DESC", [eventId], (err, rows) => resolve(rows || []));
+            });
+            
+            // Resolve Guestbook
+            const guestbook = await new Promise((resolve) => {
+                db.all("SELECT * FROM guestbook WHERE eventId = ? ORDER BY createdAt DESC", [eventId], (err, rows) => resolve(rows || []));
+            });
+
+            // Sign Media URLs
+            const signedMedia = await attachSignedUrls(media);
+            
+            // Sign Cover Image if it exists (assuming it's a key)
+            let signedCover = event.coverImage;
+            if (event.coverImage && !event.coverImage.startsWith('http') && !event.coverImage.startsWith('data:')) {
+                signedCover = await generatePresignedUrl(event.coverImage);
+            }
+
+            const detailedEvent = { ...event, media: signedMedia, guestbook, coverImage: signedCover };
+            res.json(detailedEvent);
+        } catch (e) {
+            console.error("Failed to generate signed URLs during event fetch:", e);
+            res.status(500).json({ error: 'Failed to retrieve event data from storage.' });
+        }
     });
 });
 
@@ -630,6 +667,37 @@ app.delete('/api/media/:id', (req, res) => {
         db.run("DELETE FROM media WHERE id = ?", req.params.id, (err) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ success: true });
+        });
+    });
+});
+
+// Bulk delete media
+app.post('/api/media/bulk-delete', (req, res) => {
+    const { mediaIds } = req.body;
+    
+    if (!mediaIds || !Array.isArray(mediaIds) || mediaIds.length === 0) {
+        return res.status(400).json({ error: 'Media IDs array required' });
+    }
+
+    // Get media items to delete from S3
+    const placeholders = mediaIds.map(() => '?').join(',');
+    db.all(`SELECT id, url, previewUrl FROM media WHERE id IN (${placeholders})`, mediaIds, async (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        // Delete from S3
+        for (const row of rows) {
+            try {
+                if (row.url) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.url }));
+                if (row.previewUrl) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.previewUrl }));
+            } catch (e) { 
+                console.error(`S3 Delete Error for ${row.id}:`, e.message);
+            }
+        }
+
+        // Delete from database
+        db.run(`DELETE FROM media WHERE id IN (${placeholders})`, mediaIds, (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, deletedCount: mediaIds.length });
         });
     });
 });

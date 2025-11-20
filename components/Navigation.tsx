@@ -66,7 +66,12 @@ export const Navigation: React.FC<NavigationProps> = ({
                                         onChangeLanguage(lang);
                                         setShowLangMenu(false);
                                     }}
-                                    className={`w-full text-left px-4 py-2 text-sm ${language === lang ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                                    onTouchStart={(e) => {
+                                        e.stopPropagation();
+                                        onChangeLanguage(lang);
+                                        setShowLangMenu(false);
+                                    }}
+                                    className={`w-full text-left px-4 py-2 text-sm ${language === lang ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-700 hover:bg-slate-50'} active:bg-slate-100`}
                                 >
                                     {lang.toUpperCase()}
                                 </button>
@@ -83,11 +88,11 @@ export const Navigation: React.FC<NavigationProps> = ({
                           {currentUser.name}
                           {currentUser.role === UserRole.PHOTOGRAPHER && <Briefcase size={12} className="text-amber-500" />}
                     </div>
-                    <div className={`text-xs font-medium ${currentUser.role === UserRole.PHOTOGRAPHER ? 'text-amber-600' : 'text-indigo-600'}`}>
-                        {currentUser.tier} Member
+                    <div className={`text-xs font-medium ${currentUser.role === UserRole.PHOTOGRAPHER ? 'text-amber-600' : currentUser.role === UserRole.ADMIN ? 'text-red-600' : 'text-indigo-600'}`}>
+                        {currentUser.role === UserRole.ADMIN ? 'Admin' : `${currentUser.tier} Member`}
                     </div>
                 </div>
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold border ${currentUser.role === UserRole.PHOTOGRAPHER ? 'bg-slate-900 text-amber-400 border-amber-400' : 'bg-indigo-100 text-indigo-700 border-indigo-200'}`}>
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold border ${currentUser.role === UserRole.PHOTOGRAPHER ? 'bg-slate-900 text-amber-400 border-amber-400' : currentUser.role === UserRole.ADMIN ? 'bg-red-100 text-red-700 border-red-200' : 'bg-indigo-100 text-indigo-700 border-indigo-200'}`}>
                     {currentUser.role === UserRole.PHOTOGRAPHER ? <Camera size={16} /> : currentUser.name.charAt(0)}
                 </div>
 
@@ -111,7 +116,8 @@ export const Navigation: React.FC<NavigationProps> = ({
             )}
             <button 
             onClick={onLogout}
-            className="p-3 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors touch-manipulation"
+            onTouchStart={onLogout}
+            className="p-3 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors touch-manipulation active:bg-slate-200"
             title={currentUser ? t('logOut') : t('home')}
             >
             <LogOut size={20} />

@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, Briefcase, Download, Clock, Infinity as InfinityIcon, Calendar, LayoutGrid, Camera, Video, Star, Stamp, Share2, Upload, CheckCircle, Link as LinkIcon, Image as ImageIcon, Play, Heart, X, Pause, BookOpen, Send, Lock, Search, ScanFace, Loader2 } from 'lucide-react';
+import { ShieldCheck, Briefcase, Download, Clock, Infinity as InfinityIcon, Calendar, LayoutGrid, Camera, Video, Star, Stamp, Share2, Upload, CheckCircle, Link as LinkIcon, Image as ImageIcon, Play, Heart, X, Pause, BookOpen, Send, Lock, Search, ScanFace, Loader2, Trash2, CheckSquare, Square } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Event, User, UserRole, MediaItem, TranslateFn, TierLevel, GuestbookEntry } from '../types';
 import { api } from '../services/api';
@@ -75,6 +74,11 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
 
   // Device detection
   const [isMobile, setIsMobile] = useState(false);
+
+  // Bulk Delete State
+  const [selectedMedia, setSelectedMedia] = useState<Set<string>>(new Set());
+  const [isBulkDeleteMode, setIsBulkDeleteMode] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // --- REAL-TIME UPDATES & INIT ---
   useEffect(() => {
@@ -258,6 +262,68 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
       }
   };
 
+  // --- BULK DELETE LOGIC ---
+  const toggleBulkDeleteMode = () => {
+      if (isBulkDeleteMode) {
+          // Exit bulk delete mode
+          setSelectedMedia(new Set());
+          setIsBulkDeleteMode(false);
+      } else {
+          // Enter bulk delete mode
+          setIsBulkDeleteMode(true);
+      }
+  };
+
+  const toggleMediaSelection = (mediaId: string) => {
+      const newSelected = new Set(selectedMedia);
+      if (newSelected.has(mediaId)) {
+          newSelected.delete(mediaId);
+      } else {
+          newSelected.add(mediaId);
+      }
+      setSelectedMedia(newSelected);
+  };
+
+  const selectAllMedia = () => {
+      if (selectedMedia.size === displayMedia.length) {
+          // Deselect all
+          setSelectedMedia(new Set());
+      } else {
+          // Select all
+          setSelectedMedia(new Set(displayMedia.map(item => item.id)));
+      }
+  };
+
+  const handleBulkDelete = async () => {
+      if (selectedMedia.size === 0) return;
+      
+      if (!confirm(t('confirmBulkDelete').replace('{count}', selectedMedia.size.toString()))) {
+          return;
+      }
+
+      setIsDeleting(true);
+      try {
+          const mediaIds = Array.from(selectedMedia) as string[];
+          const result = await api.bulkDeleteMedia(mediaIds);
+          
+          if (result.success) {
+              // Remove deleted media from local state
+              setLocalMedia(prev => prev.filter(item => !selectedMedia.has(item.id)));
+              // Clear selection and exit bulk delete mode
+              setSelectedMedia(new Set());
+              setIsBulkDeleteMode(false);
+              alert(t('bulkDeleteSuccess').replace('{count}', result.deletedCount.toString()));
+          } else {
+              alert(t('bulkDeleteError'));
+          }
+      } catch (error) {
+          console.error('Bulk delete failed:', error);
+          alert(t('bulkDeleteError'));
+      } finally {
+          setIsDeleting(false);
+      }
+  };
+
   // --- RENDER PIN LOCK ---
   if (isPinLocked) {
       return (
@@ -376,6 +442,58 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           </h3>
           
           <div className="flex gap-2">
+            {/* Bulk Delete Controls */}
+            {(isOwner || currentUser?.role === UserRole.ADMIN) && displayMedia.length > 0 && (
+                <>
+                    {isBulkDeleteMode ? (
+                        <>
+                            <button 
+                                onClick={selectAllMedia}
+                                className="flex items-center gap-2 text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-xl transition-colors shadow-sm"
+                            >
+                                {selectedMedia.size === displayMedia.length ? (
+                                    <CheckSquare size={18} className="text-indigo-600" />
+                                ) : (
+                                    <Square size={18} />
+                                )}
+                                <span className="hidden sm:inline">
+                                    {selectedMedia.size === displayMedia.length ? t('deselectAll') : t('selectAll')}
+                                </span>
+                            </button>
+                            
+                            {selectedMedia.size > 0 && (
+                                <button 
+                                    onClick={handleBulkDelete}
+                                    disabled={isDeleting}
+                                    className="flex items-center gap-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl transition-colors shadow-sm disabled:opacity-50"
+                                >
+                                    {isDeleting ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                                    <span className="hidden sm:inline">
+                                        {isDeleting ? t('deleting') : t('deleteSelected')} ({selectedMedia.size})
+                                    </span>
+                                </button>
+                            )}
+                            
+                            <button 
+                                onClick={toggleBulkDeleteMode}
+                                className="flex items-center gap-2 text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-xl transition-colors shadow-sm"
+                            >
+                                <X size={18} />
+                                <span className="hidden sm:inline">{t('cancel')}</span>
+                            </button>
+                        </>
+                    ) : (
+                        <button 
+                            onClick={toggleBulkDeleteMode}
+                            className="flex items-center gap-2 text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-xl transition-colors shadow-sm"
+                        >
+                            <CheckSquare size={18} />
+                            <span className="hidden sm:inline">{t('selectMedia')}</span>
+                        </button>
+                    )}
+                </>
+            )}
+
             {/* Find Me Button */}
             {modelsLoaded && localMedia.length > 0 && (
                 <button 
@@ -434,6 +552,22 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
         <div className="columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4">
           {displayMedia.map((item) => (
             <div key={item.id} className="break-inside-avoid relative group rounded-2xl overflow-hidden bg-slate-100 shadow-sm hover:shadow-md transition-all">
+              {/* Selection Checkbox */}
+              {isBulkDeleteMode && (isOwner || currentUser?.role === UserRole.ADMIN) && (
+                <div className="absolute top-3 right-3 z-10">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); toggleMediaSelection(item.id); }}
+                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
+                      selectedMedia.has(item.id) 
+                        ? 'bg-indigo-600 text-white' 
+                        : 'bg-white/90 backdrop-blur-md text-slate-400 hover:bg-indigo-100 hover:text-indigo-600'
+                    }`}
+                  >
+                    {selectedMedia.has(item.id) ? <CheckSquare size={14} /> : <Square size={14} />}
+                  </button>
+                </div>
+              )}
+              
               {item.type === 'video' ? (
                 item.isProcessing ? (
                     <div className="w-full aspect-video bg-slate-200 flex flex-col items-center justify-center text-slate-500">
@@ -448,8 +582,20 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
                             muted 
                             playsInline 
                             loop 
+                            preload="metadata"
                             onMouseOver={e => e.currentTarget.play()} 
                             onMouseOut={e => e.currentTarget.pause()}
+                            onTouchStart={() => {
+                                // Mobile touch handling - play on tap
+                                const video = document.querySelector(`video[src="${item.previewUrl || item.url}"]`) as HTMLVideoElement;
+                                if (video) {
+                                    if (video.paused) {
+                                        video.play();
+                                    } else {
+                                        video.pause();
+                                    }
+                                }
+                            }}
                         />
                         <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors pointer-events-none">
                             <Play className="text-white fill-white" size={32} />
@@ -457,7 +603,25 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
                     </div>
                 )
               ) : (
-                <img src={item.url} alt="Event memory" className="w-full h-auto object-cover" loading="lazy" />
+                <img 
+                  src={item.url} 
+                  alt="Event memory" 
+                  className="w-full h-auto object-cover" 
+                  loading="lazy"
+                  decoding="async"
+                  onError={(e) => {
+                    // Fallback for broken images on mobile
+                    const img = e.target as HTMLImageElement;
+                    img.style.display = 'none';
+                    const parent = img.parentElement;
+                    if (parent) {
+                      const fallback = document.createElement('div');
+                      fallback.className = 'w-full aspect-square bg-slate-200 flex items-center justify-center text-slate-500';
+                      fallback.innerHTML = '<span class="text-xs font-bold">Image not available</span>';
+                      parent.appendChild(fallback);
+                    }
+                  }}
+                />
               )}
               
               {item.isWatermarked && item.watermarkText && (

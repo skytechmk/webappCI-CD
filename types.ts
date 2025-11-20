@@ -53,6 +53,20 @@ export const TIER_CONFIG: Record<TierLevel, TierConfig> = {
   }
 };
 
+// Admin users get unlimited access regardless of tier
+export const getTierConfigForUser = (user: User | null): TierConfig => {
+  if (user?.role === UserRole.ADMIN) {
+    return {
+      storageLimitMb: Infinity,
+      maxDurationDays: null, // Unlimited
+      allowVideo: true,
+      allowBranding: true,
+      allowWatermark: true
+    };
+  }
+  return TIER_CONFIG[user?.tier || TierLevel.FREE];
+};
+
 export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
 
 export interface User {

@@ -179,7 +179,8 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     noMatchesFound: "No photos of you found yet.",
     clearFilter: "Clear Filter",
     processing: "Processing Video...",
-    switchCamera: "Switch Camera"
+    switchCamera: "Switch Camera",
+    backToApp: "Back to App"
   },
   mk: {
     appName: "SnapifY",

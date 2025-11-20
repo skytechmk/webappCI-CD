@@ -196,7 +196,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <button 
                       key={lang}
                       onClick={() => { onChangeLanguage(lang); setMobileMenuOpen(false); }}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium ${language === lang ? 'bg-indigo-600 text-white' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}
+                      onTouchStart={() => { onChangeLanguage(lang); setMobileMenuOpen(false); }}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium ${language === lang ? 'bg-indigo-600 text-white' : 'bg-white/10 text-slate-300 hover:bg-white/20'} active:bg-white/30`}
                   >
                       {lang.toUpperCase()}
                   </button>

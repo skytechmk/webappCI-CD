@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 // @ts-ignore
 import { jwtDecode } from 'jwt-decode';
-import { User, Event, MediaItem, UserRole, TierLevel, Language, TranslateFn, TIER_CONFIG } from './types';
+import { User, Event, MediaItem, UserRole, TierLevel, Language, TranslateFn, TIER_CONFIG, getTierConfigForUser } from './types';
 import { generateImageCaption } from './services/geminiService';
 import { TRANSLATIONS } from './constants';
 import { CameraCapture } from './components/CameraCapture';
@@ -63,21 +63,18 @@ export default function App() {
 
   const loadInitialData = async () => {
       try {
-          const [users, evts] = await Promise.all([
-              api.fetchUsers(),
-              // Pass current user ID if available, otherwise fetch all events (for landing page)
-              currentUser ? api.fetchEvents(currentUser.id) : api.fetchEvents()
-          ]);
+          const users = await api.fetchUsers();
           setAllUsers(users);
-          setEvents(evts);
 
-          // Check LocalStorage ONLY for persistent login session ID, not data
+          // Check LocalStorage for persistent login session ID
           const storedUserId = localStorage.getItem('snapify_user_id');
+          let currentUserFromStorage = null;
+          
           if (storedUserId) {
               const user = users.find(u => u.id === storedUserId);
               if (user) {
+                  currentUserFromStorage = user;
                   setCurrentUser(user);
-                  // If we were viewing an event, handle that separately below
               }
           }
           
@@ -87,29 +84,70 @@ export default function App() {
               if (storedUserIdFromFingerprint) {
                   const user = users.find(u => u.id === storedUserIdFromFingerprint);
                   if (user) {
+                      currentUserFromStorage = user;
                       setCurrentUser(user);
                       localStorage.setItem('snapify_user_id', user.id);
                   }
               }
           }
+
+          // Fetch events based on user context
+          let evts: Event[];
+          if (currentUserFromStorage) {
+              // Admin users can see all events, regular users only see their own
+              if (currentUserFromStorage.role === UserRole.ADMIN) {
+                  evts = await api.fetchEvents(currentUserFromStorage.id); // Fetch all events for admin (pass admin's user ID)
+              } else {
+                  evts = await api.fetchEvents(currentUserFromStorage.id); // Only user's events
+              }
+          } else {
+              // Not logged in - fetch all events for landing page/shared links
+              evts = await api.fetchEvents();
+          }
+          setEvents(evts);
           
           // Language
           const storedLang = localStorage.getItem('snapify_lang') as Language;
           if (storedLang && TRANSLATIONS[storedLang]) setLanguage(storedLang);
 
-          // URL Routing
+          // URL Routing - Check for shared event links (this should work regardless of login status)
           const params = new URLSearchParams(window.location.search);
           const sharedEventId = params.get('event');
+          let hasSharedEvent = false;
+          
           if (sharedEventId) {
-               const evt = evts.find(e => e.id === sharedEventId);
-               if (evt) {
-                 setCurrentEventId(sharedEventId);
-                 setView('event');
-                 incrementEventViews(sharedEventId, evts);
+               // For shared events, we need to fetch the specific event even if user is logged in
+               // This ensures shared links work for events that don't belong to the current user
+               try {
+                   const sharedEvent = await api.fetchEventById(sharedEventId);
+                   if (sharedEvent) {
+                       // Add the shared event to the current events list so it can be displayed
+                       if (!evts.find(e => e.id === sharedEventId)) {
+                           setEvents(prev => [...prev, sharedEvent]);
+                       }
+                       setCurrentEventId(sharedEventId);
+                       setView('event');
+                       incrementEventViews(sharedEventId, [sharedEvent]);
+                       hasSharedEvent = true;
+                   }
+               } catch (error) {
+                   console.error("Failed to fetch shared event", error);
                }
-          } else if (storedUserId || currentUser) {
-              // If logged in and not visiting a link, go to dashboard
-              setView('dashboard');
+          }
+          
+          // Only set view to dashboard or landing if we didn't process a shared event
+          if (!hasSharedEvent) {
+              if (storedUserId || currentUserFromStorage) {
+                  // If logged in and not visiting a link, go to appropriate dashboard
+                  if (currentUserFromStorage?.role === UserRole.ADMIN) {
+                      setView('admin');
+                  } else {
+                      setView('dashboard');
+                  }
+              } else {
+                  // If not logged in and no shared link, stay on landing page
+                  setView('landing');
+              }
           }
 
       } catch (err) {
@@ -169,7 +207,7 @@ export default function App() {
                  role: isAdmin ? UserRole.ADMIN : UserRole.USER,
                  tier: isAdmin ? TierLevel.PRO : TierLevel.FREE,
                  storageUsedMb: 0,
-                 storageLimitMb: isAdmin ? TIER_CONFIG[TierLevel.STUDIO].storageLimitMb : TIER_CONFIG[TierLevel.FREE].storageLimitMb,
+                 storageLimitMb: isAdmin ? Infinity : TIER_CONFIG[TierLevel.FREE].storageLimitMb,
                  joinedDate: new Date().toISOString().split('T')[0]
              };
              user = await api.createUser(user);
@@ -177,7 +215,7 @@ export default function App() {
           } else {
                const isAdmin = email.toLowerCase() === (env.VITE_ADMIN_EMAIL || '').toLowerCase();
                if (isAdmin && user.role !== UserRole.ADMIN) {
-                   user = { ...user, role: UserRole.ADMIN, tier: TierLevel.STUDIO, storageLimitMb: TIER_CONFIG[TierLevel.STUDIO].storageLimitMb };
+                   user = { ...user, role: UserRole.ADMIN, tier: TierLevel.PRO, storageLimitMb: Infinity };
                    await api.updateUser(user);
                }
           }
@@ -245,11 +283,11 @@ export default function App() {
                 name: name,
                 email: email,
                 role: isAdmin ? UserRole.ADMIN : (isPhotographer ? UserRole.PHOTOGRAPHER : UserRole.USER),
-                tier: isAdmin ? TierLevel.STUDIO : tier,
+                tier: isAdmin ? TierLevel.PRO : tier,
                 storageUsedMb: 0,
-                storageLimitMb: isAdmin ? TIER_CONFIG[TierLevel.STUDIO].storageLimitMb : config.storageLimitMb,
+                storageLimitMb: isAdmin ? Infinity : config.storageLimitMb,
                 joinedDate: new Date().toISOString().split('T')[0],
-                studioName: isPhotographer ? studioName : undefined
+                studioName: isAdmin ? undefined : (isPhotographer ? studioName : undefined)
             };
             const created = await api.createUser(newUser);
             setAllUsers(prev => [...prev, created]);
@@ -270,6 +308,15 @@ export default function App() {
 
             const foundUser = allUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
             if (foundUser) {
+                // Fetch events based on user role
+                let userEvents: Event[];
+                if (foundUser.role === UserRole.ADMIN) {
+                    userEvents = await api.fetchEvents(); // Fetch all events for admin
+                } else {
+                    userEvents = await api.fetchEvents(foundUser.id); // Only user's events
+                }
+                setEvents(userEvents);
+                
                 setCurrentUser(foundUser);
                 localStorage.setItem('snapify_user_id', foundUser.id);
                 setView(foundUser.role === UserRole.ADMIN ? 'admin' : 'dashboard');
@@ -318,7 +365,7 @@ export default function App() {
              expiresAt = new Date(now + (days || 30) * 24 * 60 * 60 * 1000).toISOString();
         }
     } else {
-        const config = TIER_CONFIG[currentUser.tier];
+        const config = getTierConfigForUser(currentUser);
         if (config.maxDurationDays === null) {
             expiresAt = null;
         } else if (currentUser.tier === TierLevel.FREE && config.maxDurationHours) {
@@ -450,7 +497,7 @@ export default function App() {
     const type = file.type.startsWith('video') ? 'video' : 'image';
 
     if (type === 'video' && currentUser) {
-        const config = TIER_CONFIG[currentUser.tier];
+        const config = getTierConfigForUser(currentUser);
         if (!config.allowVideo) {
             alert(t('videoRestricted'));
             return;
@@ -468,7 +515,7 @@ export default function App() {
             caption = await generateImageCaption(result);
         }
 
-        const config = currentUser ? TIER_CONFIG[currentUser.tier] : TIER_CONFIG[TierLevel.FREE];
+        const config = currentUser ? getTierConfigForUser(currentUser) : TIER_CONFIG[TierLevel.FREE];
         const canWatermark = currentUser?.role === UserRole.PHOTOGRAPHER && config.allowWatermark;
         const shouldWatermark = applyWatermarkState && canWatermark;
 
@@ -533,7 +580,7 @@ export default function App() {
     const uploader = currentUser ? (currentUser.studioName || currentUser.name) : guestName || "Guest";
     const caption = await generateImageCaption(imageSrc);
     
-    const config = currentUser ? TIER_CONFIG[currentUser.tier] : TIER_CONFIG[TierLevel.FREE];
+    const config = currentUser ? getTierConfigForUser(currentUser) : TIER_CONFIG[TierLevel.FREE];
     const canWatermark = currentUser?.role === UserRole.PHOTOGRAPHER && config.allowWatermark;
     const shouldWatermark = applyWatermarkState && canWatermark;
     
@@ -700,11 +747,11 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       
-      {view === 'admin' ? (
+      {view === 'admin' && currentUser?.role === UserRole.ADMIN ? (
          <AdminDashboard 
             users={allUsers}
             events={events}
-            onClose={() => setView('landing')}
+            onClose={() => setView('admin')}
             onDeleteUser={async (id) => { await api.deleteUser(id); setAllUsers(prev => prev.filter(u => u.id !== id)); }}
             onDeleteEvent={handleDeleteEvent}
             onDeleteMedia={handleDeleteMedia}
@@ -730,8 +777,15 @@ export default function App() {
           }}
           onHome={() => {
             setCurrentEventId(null);
-            if (currentUser) setView('dashboard');
-            else setView('landing');
+            if (currentUser) {
+              if (currentUser.role === UserRole.ADMIN) {
+                setView('admin');
+              } else {
+                setView('dashboard');
+              }
+            } else {
+              setView('landing');
+            }
           }}
           onOpenSettings={() => setShowStudioSettings(true)}
           t={t}

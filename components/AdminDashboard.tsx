@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   BarChart, 
@@ -10,7 +9,7 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { User, UserRole, TierLevel, Event, TranslateFn, MediaItem } from '../types';
-import { Trash2, UserCog, HardDrive, Zap, Calendar, Image as ImageIcon, X, Clock, Eye, Plus, Edit, Save, Camera, Briefcase, AlertTriangle, ZoomIn, Download, Lock } from 'lucide-react';
+import { Trash2, UserCog, HardDrive, Zap, Calendar, Image as ImageIcon, X, Clock, Eye, Plus, Edit, Save, Camera, Briefcase, AlertTriangle, ZoomIn, Download, Lock, ExternalLink, ArrowLeft } from 'lucide-react';
 
 interface AdminDashboardProps {
   users: User[];
@@ -27,7 +26,7 @@ interface AdminDashboardProps {
   t: TranslateFn;
 }
 
-type Tab = 'users' | 'events';
+type Tab = 'users' | 'events' | 'userEvents';
 
 interface DeleteConfirmationState {
   isOpen: boolean;
@@ -55,6 +54,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<Tab>('users');
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null);
+  const [selectedUserForEvents, setSelectedUserForEvents] = useState<User | null>(null);
   
   // Delete Confirmation State
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
@@ -96,6 +96,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const isExpired = (dateStr: string | null) => {
     if (!dateStr) return false;
     return new Date() > new Date(dateStr);
+  };
+
+  // Get events for a specific user
+  const getUserEvents = (userId: string) => {
+    console.log('Debug: Filtering events for user ID:', userId);
+    console.log('Debug: Available events:', events.map(e => ({ id: e.id, hostId: e.hostId, title: e.title })));
+    
+    const userEvents = events.filter(event => {
+      const match = event.hostId === userId;
+      console.log(`Debug: Event ${event.id} (host: ${event.hostId}) matches user ${userId}: ${match}`);
+      return match;
+    });
+    
+    console.log('Debug: Found events for user:', userEvents);
+    return userEvents;
   };
 
   // --- Delete Logic ---
@@ -219,6 +234,131 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingUser(null);
   };
 
+  // --- User Events Logic ---
+  const viewUserEvents = (user: User) => {
+    setSelectedUserForEvents(user);
+    setActiveTab('userEvents');
+  };
+
+  const backToUsers = () => {
+    setSelectedUserForEvents(null);
+    setActiveTab('users');
+  };
+
+  // Render user events view
+  const renderUserEvents = () => {
+    if (!selectedUserForEvents) return null;
+    
+    const userEvents = getUserEvents(selectedUserForEvents.id);
+    
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-6 border-b border-slate-100 flex items-center gap-4">
+          <button 
+            onClick={backToUsers}
+            className="flex items-center gap-2 text-slate-600 hover:text-slate-800 transition-colors"
+          >
+            <ArrowLeft size={20} />
+            Back to Users
+          </button>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {selectedUserForEvents.name}'s Events
+            </h3>
+            <p className="text-sm text-slate-500">
+              {userEvents.length} events • {selectedUserForEvents.email}
+            </p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Event</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Media Count</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-slate-100">
+              {userEvents.map((evt) => (
+                <tr key={evt.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 flex items-center gap-1">
+                        {evt.title}
+                        {evt.pin && <Lock size={12} className="text-amber-500" />}
+                      </div>
+                      <div className="text-xs text-slate-500 flex items-center gap-1 mt-1">
+                        <Calendar size={12} /> {evt.date || t('noDate')}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {isExpired(evt.expiresAt) ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 flex items-center w-fit">
+                        <Clock size={12} className="mr-1" /> {t('expired')}
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 flex items-center w-fit">
+                        <Zap size={12} className="mr-1" /> {t('active')}
+                      </span>
+                    )}
+                    {evt.expiresAt && (
+                      <div className="text-xs text-slate-400 mt-1">
+                        {t('exp')}: {new Date(evt.expiresAt).toLocaleDateString()} {new Date(evt.expiresAt).toLocaleTimeString()}
+                      </div>
+                    )}
+                    {!evt.expiresAt && <div className="text-xs text-indigo-500 mt-1 font-medium">{t('unlimited')}</div>}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                    {evt.media.length} {t('items')}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-2">
+                    <button 
+                      onClick={() => onDownloadEvent(evt)}
+                      className="text-green-600 hover:bg-green-50 p-2 rounded-full transition-colors"
+                      title={t('downloadAll')}
+                    >
+                      <Download size={18} />
+                    </button>
+                    <button 
+                      onClick={() => openEditModal(evt)}
+                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-colors"
+                      title="Edit Event"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button 
+                      onClick={() => setSelectedEvent(evt)}
+                      className="text-indigo-600 hover:bg-indigo-50 p-2 rounded-full transition-colors"
+                      title="View Media"
+                    >
+                      <Eye size={18} />
+                    </button>
+                    <button 
+                      onClick={() => promptDeleteEvent(evt)}
+                      className="text-red-600 hover:bg-red-50 p-2 rounded-full transition-colors"
+                      title="Delete Event"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {userEvents.length === 0 && (
+            <div className="p-8 text-center text-slate-500">
+              <Calendar size={48} className="mx-auto mb-4 text-slate-300" />
+              <p>No events found for this user</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">
       <header className="mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -253,34 +393,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {t('events')}
                 </button>
             </div>
-            <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
-            {t('exit')}
+            <button onClick={onClose} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg transition-colors border border-indigo-500">
+              ← {t('backToAdmin')}
             </button>
         </div>
       </header>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-800">{t('totalUsers')}</h3>
-            <div className="p-2 bg-indigo-50 rounded-lg">
-              <UserCog className="text-indigo-500" size={20} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">{users.length}</p>
-        </div>
-        
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-800">{t('totalEvents')}</h3>
-            <div className="p-2 bg-purple-50 rounded-lg">
-              <Calendar className="text-purple-500" size={20} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">{events.length}</p>
-        </div>
-
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-slate-800">{t('totalMedia')}</h3>
@@ -307,7 +427,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* Main Content */}
-      {activeTab === 'users' ? (
+      {activeTab === 'userEvents' ? (
+        renderUserEvents()
+      ) : activeTab === 'users' ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* User List */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -373,6 +495,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-2">
                         {user.role !== UserRole.ADMIN && (
                             <>
+                                <button 
+                                    onClick={() => viewUserEvents(user)}
+                                    className="text-green-600 hover:text-green-900 p-2 hover:bg-green-50 rounded-full transition-colors"
+                                    title="View User Events"
+                                >
+                                    <Eye size={18} />
+                                </button>
                                 <button 
                                     onClick={() => openEditUserModal(user)}
                                     className="text-blue-600 hover:text-blue-900 p-2 hover:bg-blue-50 rounded-full transition-colors"
