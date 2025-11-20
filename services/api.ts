@@ -33,8 +33,9 @@ export const api = {
     },
 
     // Events
-    fetchEvents: async (): Promise<Event[]> => {
-        const res = await fetch(`${API_URL}/api/events`);
+    fetchEvents: async (userId?: string): Promise<Event[]> => {
+        const url = userId ? `${API_URL}/api/events?userId=${encodeURIComponent(userId)}` : `${API_URL}/api/events`;
+        const res = await fetch(url);
         const data = await res.json();
         // Normalize boolean/number conversions from SQLite
         return data.map((e: any) => ({

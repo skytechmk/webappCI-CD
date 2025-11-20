@@ -353,39 +353,63 @@ app.delete('/api/users/:id', (req, res) => {
 
 // Events
 app.get('/api/events', (req, res) => {
-    db.all("SELECT * FROM events", [], async (err, events) => {
+    // Get user ID from query parameter for access control
+    const userId = req.query.userId;
+    
+    if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+    }
+
+    // Get user role to determine access level
+    db.get("SELECT role FROM users WHERE id = ?", [userId], (err, user) => {
         if (err) return res.status(500).json({ error: err.message });
-        
-        try {
-            const detailedEvents = await Promise.all(events.map(async (evt) => {
-                // Resolve Media
-                const media = await new Promise((resolve) => {
-                    db.all("SELECT * FROM media WHERE eventId = ? ORDER BY uploadedAt DESC", [evt.id], (err, rows) => resolve(rows || []));
-                });
-                
-                // Resolve Guestbook
-                const guestbook = await new Promise((resolve) => {
-                    db.all("SELECT * FROM guestbook WHERE eventId = ? ORDER BY createdAt DESC", [evt.id], (err, rows) => resolve(rows || []));
-                });
+        if (!user) return res.status(404).json({ error: 'User not found' });
 
-                // Sign Media URLs
-                const signedMedia = await attachSignedUrls(media);
-                
-                // Sign Cover Image if it exists (assuming it's a key)
-                let signedCover = evt.coverImage;
-                if (evt.coverImage && !evt.coverImage.startsWith('http') && !evt.coverImage.startsWith('data:')) {
-                    signedCover = await generatePresignedUrl(evt.coverImage);
-                }
+        let query = "SELECT * FROM events";
+        let params = [];
 
-                return { ...evt, media: signedMedia, guestbook, coverImage: signedCover };
-            }));
-            
-            res.json(detailedEvents);
-        } catch (e) {
-            console.error("Failed to generate signed URLs during event fetch:", e);
-            // Return events anyway, even if some URLs failed to sign (they will appear broken in UI but app won't crash)
-            res.status(500).json({ error: 'Failed to retrieve event data from storage.' });
+        // Admin users can see all events
+        if (user.role !== 'admin') {
+            // Regular users can only see their own events and events they've been invited to via shared links
+            // For now, we'll only show events they own. Shared events are handled via direct links.
+            query = "SELECT * FROM events WHERE hostId = ?";
+            params = [userId];
         }
+
+        db.all(query, params, async (err, events) => {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            try {
+                const detailedEvents = await Promise.all(events.map(async (evt) => {
+                    // Resolve Media
+                    const media = await new Promise((resolve) => {
+                        db.all("SELECT * FROM media WHERE eventId = ? ORDER BY uploadedAt DESC", [evt.id], (err, rows) => resolve(rows || []));
+                    });
+                    
+                    // Resolve Guestbook
+                    const guestbook = await new Promise((resolve) => {
+                        db.all("SELECT * FROM guestbook WHERE eventId = ? ORDER BY createdAt DESC", [evt.id], (err, rows) => resolve(rows || []));
+                    });
+
+                    // Sign Media URLs
+                    const signedMedia = await attachSignedUrls(media);
+                    
+                    // Sign Cover Image if it exists (assuming it's a key)
+                    let signedCover = evt.coverImage;
+                    if (evt.coverImage && !evt.coverImage.startsWith('http') && !evt.coverImage.startsWith('data:')) {
+                        signedCover = await generatePresignedUrl(evt.coverImage);
+                    }
+
+                    return { ...evt, media: signedMedia, guestbook, coverImage: signedCover };
+                }));
+                
+                res.json(detailedEvents);
+            } catch (e) {
+                console.error("Failed to generate signed URLs during event fetch:", e);
+                // Return events anyway, even if some URLs failed to sign (they will appear broken in UI but app won't crash)
+                res.status(500).json({ error: 'Failed to retrieve event data from storage.' });
+            }
+        });
     });
 });
 

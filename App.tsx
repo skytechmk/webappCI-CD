@@ -65,7 +65,8 @@ export default function App() {
       try {
           const [users, evts] = await Promise.all([
               api.fetchUsers(),
-              api.fetchEvents()
+              // Pass current user ID if available, otherwise fetch all events (for landing page)
+              currentUser ? api.fetchEvents(currentUser.id) : api.fetchEvents()
           ]);
           setAllUsers(users);
           setEvents(evts);
