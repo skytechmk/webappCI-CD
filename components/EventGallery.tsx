@@ -88,6 +88,7 @@ interface EventGalleryProps {
   onSetCover: (item: MediaItem) => void;
   onUpload: (type: 'camera' | 'upload') => void;
   onLike: (item: MediaItem) => void;
+  onOpenLiveSlideshow: () => void;
   t: TranslateFn;
 }
 
@@ -105,6 +106,7 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
   onSetCover,
   onUpload,
   onLike,
+  onOpenLiveSlideshow,
   t
 }) => {
   // State

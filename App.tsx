@@ -774,6 +774,8 @@ export default function App() {
           {view === 'live' && activeEvent && (
                 <LiveSlideshow 
                   event={activeEvent}
+                  currentUser={currentUser}
+                  hostUser={hostUser}
                   onClose={() => setView('event')}
                   t={t}
                 />
