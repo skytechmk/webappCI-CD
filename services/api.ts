@@ -27,11 +27,11 @@ export const api = {
         return res.json();
     },
 
-    googleLogin: async (email: string, name: string): Promise<{ token: string, user: User }> => {
+    googleLogin: async (credential: string): Promise<{ token: string, user: User }> => {
         const res = await fetch(`${API_URL}/api/auth/google`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, name })
+            body: JSON.stringify({ credential })
         });
         if (!res.ok) throw new Error("Google login failed");
         return res.json();
@@ -214,5 +214,32 @@ export const api = {
             success: data.success || false,
             deletedCount: data.deletedCount || 0
         };
+    },
+
+    // SECURITY: Gemini AI endpoints (moved from frontend to backend)
+    generateImageCaption: async (base64Image: string): Promise<string> => {
+        const res = await fetch(`${API_URL}/api/ai/generate-caption`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders() 
+            },
+            body: JSON.stringify({ base64Image })
+        });
+        const data = await res.json();
+        return data.caption || "Captured moment";
+    },
+
+    generateEventDescription: async (title: string, date: string, type: string): Promise<string> => {
+        const res = await fetch(`${API_URL}/api/ai/generate-event-description`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders() 
+            },
+            body: JSON.stringify({ title, date, type })
+        });
+        const data = await res.json();
+        return data.description || "Join us for an amazing celebration!";
     }
 };

@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 // @ts-ignore
 import { jwtDecode } from 'jwt-decode';
 import { User, Event, MediaItem, UserRole, TierLevel, Language, TranslateFn, TIER_CONFIG, getTierConfigForUser } from './types';
-import { generateImageCaption } from './services/geminiService';
+import { api } from './services/api';
 import { TRANSLATIONS } from './constants';
 import { CameraCapture } from './components/CameraCapture';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -23,7 +23,6 @@ import { OfflineBanner } from './components/OfflineBanner';
 import { ShareTargetHandler } from './components/ShareTargetHandler';
 import { ReloadPrompt } from './components/ReloadPrompt';
 import { applyWatermark } from './utils/imageProcessing';
-import { api } from './services/api';
 import { getStoredUserId, isKnownDevice, clearDeviceFingerprint } from './utils/deviceFingerprint';
 import { socketService } from './services/socketService';
 
@@ -46,14 +45,25 @@ const sanitizeInput = (input: string): string => {
 
 // Security: Simple encryption for sensitive localStorage data
 const encryptData = (data: string): string => {
-  // Simple base64 encoding for demonstration
-  // In production, use proper encryption like AES
-  return btoa(encodeURIComponent(data));
+  // Simple XOR-based obfuscation for demonstration
+  // In production, use proper encryption like AES with a secure key
+  const key = 'snapify-secure-key-2025';
+  let result = '';
+  for (let i = 0; i < data.length; i++) {
+    result += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  return btoa(result);
 };
 
 const decryptData = (encryptedData: string): string => {
   try {
-    return decodeURIComponent(atob(encryptedData));
+    const key = 'snapify-secure-key-2025';
+    const decoded = atob(encryptedData);
+    let result = '';
+    for (let i = 0; i < decoded.length; i++) {
+      result += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return result;
   } catch {
     return '';
   }
@@ -239,12 +249,11 @@ export default function App() {
 
   const handleGoogleResponse = async (response: any) => {
       try {
-          const decoded: any = jwtDecode(response.credential);
-          const email = decoded.email;
-          const name = decoded.name;
+          // SECURITY: Send the raw credential to backend for verification
+          const credential = response.credential;
           
           try {
-              const res = await api.googleLogin(email, name);
+              const res = await api.googleLogin(credential);
               finalizeLogin(res.user, res.token);
           } catch (e) {
               console.error("Backend auth failed", e);
@@ -590,7 +599,7 @@ export default function App() {
         }
         let finalCaption = userCaption;
         if (!finalCaption && type === 'image') {
-             finalCaption = await generateImageCaption(src);
+             finalCaption = await api.generateImageCaption(src);
         }
         const config = currentUser ? getTierConfigForUser(currentUser) : TIER_CONFIG[TierLevel.FREE];
         const canWatermark = currentUser?.role === UserRole.PHOTOGRAPHER && config.allowWatermark;

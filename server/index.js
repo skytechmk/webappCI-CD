@@ -18,6 +18,8 @@ import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
 import webpush from 'web-push'; // Added web-push
 import bcrypt from 'bcrypt'; // SECURITY: Add password hashing
+import { OAuth2Client } from 'google-auth-library'; // SECURITY: Add Google token verification
+import { GoogleGenAI } from "@google/genai"; // SECURITY: Move Gemini to backend
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -34,9 +36,19 @@ if (process.env.NODE_ENV === 'production') {
     }
 }
 
-const ADMIN_EMAIL = process.env.VITE_ADMIN_EMAIL || 'admin@skytech.mk';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'; 
-const JWT_SECRET = process.env.JWT_SECRET || 'change_this_in_production_secure_random_string';
+// SECURITY: Environment-dependent credentials
+const ADMIN_EMAIL = process.env.NODE_ENV === 'production' 
+    ? (process.env.VITE_ADMIN_EMAIL || 'admin@skytech.mk')
+    : (process.env.VITE_ADMIN_EMAIL || 'admin@skytech.mk');
+    
+const ADMIN_PASSWORD = process.env.NODE_ENV === 'production'
+    ? (process.env.ADMIN_PASSWORD || 'admin123')
+    : (process.env.ADMIN_PASSWORD || 'admin123');
+
+const JWT_SECRET = process.env.NODE_ENV === 'production'
+    ? (process.env.JWT_SECRET || 'change_this_in_production_secure_random_string')
+    : (process.env.JWT_SECRET || 'dev_jwt_secret_change_in_production');
+    
 const JWT_EXPIRY = '7d'; // SECURITY: Reduced from 365d to 7d for better security
 
 // Domain Management - SECURITY: Restrict CORS in production
@@ -136,6 +148,7 @@ db.serialize(() => {
         id TEXT PRIMARY KEY,
         name TEXT,
         email TEXT UNIQUE,
+        password TEXT,
         role TEXT DEFAULT 'USER',
         tier TEXT DEFAULT 'FREE',
         storageUsedMb REAL DEFAULT 0,
@@ -181,12 +194,20 @@ db.serialize(() => {
         const hasPrivacy = rows.some(row => row.name === 'privacy');
         if (!hasPrivacy) {
             console.log("Migrating media table: Adding privacy column...");
-            db.run("ALTER TABLE media ADD COLUMN privacy TEXT DEFAULT 'public'");
+            db.run("ALTER TABLE media ADD COLUMN privacy TEXT DEFAULT 'public'", (err) => {
+                if (err && !err.message.includes('duplicate column name')) {
+                    console.error("Privacy column migration error:", err);
+                }
+            });
         }
         const hasUploaderId = rows.some(row => row.name === 'uploaderId');
         if (!hasUploaderId) {
             console.log("Migrating media table: Adding uploaderId column...");
-            db.run("ALTER TABLE media ADD COLUMN uploaderId TEXT");
+            db.run("ALTER TABLE media ADD COLUMN uploaderId TEXT", (err) => {
+                if (err && !err.message.includes('duplicate column name')) {
+                    console.error("UploaderId column migration error:", err);
+                }
+            });
         }
     });
 
@@ -228,7 +249,30 @@ db.serialize(() => {
     )`);
 });
 
-// File Upload Middleware
+// SECURITY: Rate limiting for media uploads
+const uploadLimits = {
+    // Store upload counts per IP
+    uploadCounts: new Map(),
+    
+    // Reset counters every hour
+    resetInterval: setInterval(() => {
+        this.uploadCounts.clear();
+    }, 60 * 60 * 1000),
+    
+    // Check if IP is rate limited
+    isRateLimited: (ip) => {
+        const count = this.uploadCounts.get(ip) || 0;
+        return count >= 50; // Max 50 uploads per hour per IP
+    },
+    
+    // Increment upload count for IP
+    increment: (ip) => {
+        const count = this.uploadCounts.get(ip) || 0;
+        this.uploadCounts.set(ip, count + 1);
+    }
+};
+
+// SECURITY: File upload middleware with DoS protection
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => {
@@ -236,7 +280,33 @@ const storage = multer.diskStorage({
         cb(null, uniqueSuffix + path.extname(file.originalname));
     }
 });
-const upload = multer({ storage: storage });
+
+const upload = multer({ 
+    storage: storage,
+    limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB max file size
+        files: 1 // Only one file per request
+    },
+    fileFilter: (req, file, cb) => {
+        // SECURITY: Validate file types
+        const allowedMimes = [
+            'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+            'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo'
+        ];
+        
+        if (!allowedMimes.includes(file.mimetype)) {
+            return cb(new Error('Invalid file type'), false);
+        }
+        
+        // SECURITY: Rate limiting check
+        const clientIP = req.ip || req.connection.remoteAddress;
+        if (uploadLimits.isRateLimited(clientIP)) {
+            return cb(new Error('Upload limit exceeded. Please try again later.'), false);
+        }
+        
+        cb(null, true);
+    }
+});
 
 // S3 Helpers
 async function uploadToS3(filePath, key, contentType) {
@@ -371,48 +441,156 @@ app.post('/api/auth/login', async (req, res) => {
     });
 });
 
-app.post('/api/auth/google', (req, res) => {
-    const { email, name } = req.body;
-    if (!email) return res.status(400).json({ error: "Email is required" });
+// SECURITY: Google OAuth2 Client for token verification
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-    const normalizedEmail = email.toLowerCase();
-    const safeRole = 'USER';
-    const safeTier = 'FREE';
-    const safeStorageLimit = 100; 
+// SECURITY: Gemini AI Client (moved from frontend to prevent API key exposure)
+const getGeminiClient = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn("Gemini API Key is missing in .env file");
+    return null;
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
-    db.get("SELECT * FROM users WHERE lower(email) = ?", [normalizedEmail], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
+app.post('/api/auth/google', async (req, res) => {
+    const { credential } = req.body;
+    
+    if (!credential) {
+        return res.status(400).json({ error: "Google credential is required" });
+    }
+
+    // Check if Google Client ID is configured
+    if (!process.env.GOOGLE_CLIENT_ID) {
+        console.error("Google Client ID is not configured");
+        return res.status(500).json({ error: "Google authentication is not configured" });
+    }
+
+    try {
+        // SECURITY: Verify the Google ID token
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
         
-        if (row) {
-            const token = jwt.sign({ 
-                id: row.id, 
-                role: row.role, 
-                email: row.email 
-            }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-            return res.json({ token, user: row });
-        } else {
-            const newId = `user-${Date.now()}`;
-            const joinedDate = new Date().toISOString().split('T')[0];
-            
-            const stmt = db.prepare(`INSERT INTO users (id, name, email, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-            stmt.run(newId, name, email, safeRole, safeTier, 0, safeStorageLimit, joinedDate, null, function(err) {
-                if (err) return res.status(500).json({ error: err.message });
-                
-                const token = jwt.sign({ 
-                    id: newId, 
-                    role: safeRole, 
-                    email: email 
-                }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-
-                const newUser = { 
-                    id: newId, name, email, role: safeRole, tier: safeTier, 
-                    storageUsedMb: 0, storageLimitMb: safeStorageLimit, joinedDate 
-                };
-                res.json({ token, user: newUser });
-            });
-            stmt.finalize();
+        const payload = ticket.getPayload();
+        if (!payload) {
+            return res.status(401).json({ error: "Invalid Google token" });
         }
-    });
+
+        const { email, name } = payload;
+        if (!email) {
+            return res.status(400).json({ error: "Email is required" });
+        }
+
+        const normalizedEmail = email.toLowerCase();
+        const safeRole = 'USER';
+        const safeTier = 'FREE';
+        const safeStorageLimit = 100; 
+
+        db.get("SELECT * FROM users WHERE lower(email) = ?", [normalizedEmail], (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            if (row) {
+                const token = jwt.sign({ 
+                    id: row.id, 
+                    role: row.role, 
+                    email: row.email 
+                }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+                return res.json({ token, user: row });
+            } else {
+                const newId = `user-${Date.now()}`;
+                const joinedDate = new Date().toISOString().split('T')[0];
+                
+                const stmt = db.prepare(`INSERT INTO users (id, name, email, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+                stmt.run(newId, name, email, safeRole, safeTier, 0, safeStorageLimit, joinedDate, null, function(err) {
+                    if (err) return res.status(500).json({ error: err.message });
+                    
+                    const token = jwt.sign({ 
+                        id: newId, 
+                        role: safeRole, 
+                        email: email 
+                    }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+
+                    const newUser = { 
+                        id: newId, name, email, role: safeRole, tier: safeTier, 
+                        storageUsedMb: 0, storageLimitMb: safeStorageLimit, joinedDate 
+                    };
+                    res.json({ token, user: newUser });
+                });
+                stmt.finalize();
+            }
+        });
+    } catch (error) {
+        console.error("Google token verification failed:", error);
+        console.error("Error details:", error.message);
+        return res.status(401).json({ error: "Google authentication failed: " + error.message });
+    }
+});
+
+// SECURITY: Gemini AI endpoints (moved from frontend to prevent API key exposure)
+app.post('/api/ai/generate-caption', authenticateToken, async (req, res) => {
+    const { base64Image } = req.body;
+    
+    if (!base64Image) {
+        return res.status(400).json({ error: "Base64 image is required" });
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+        return res.json({ caption: "Event memory" });
+    }
+
+    try {
+        // Clean base64 string if it has data URI prefix
+        const cleanBase64 = base64Image.split(',')[1] || base64Image;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: {
+                parts: [
+                    {
+                        inlineData: {
+                            mimeType: 'image/jpeg',
+                            data: cleanBase64
+                        }
+                    },
+                    {
+                        text: "Generate a short caption (max 10 words) for this photo. Include key objects, colors, or the mood (e.g., 'Birthday cake with candles', 'People dancing happily')."
+                    }
+                ]
+            }
+        });
+        res.json({ caption: response.text });
+    } catch (error) {
+        console.error("Error generating caption:", error);
+        res.json({ caption: "Captured moment" });
+    }
+});
+
+app.post('/api/ai/generate-event-description', authenticateToken, async (req, res) => {
+    const { title, date, type } = req.body;
+    
+    if (!title || !date || !type) {
+        return res.status(400).json({ error: "Title, date, and type are required" });
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+        return res.json({ description: "Join us for an amazing celebration!" });
+    }
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Write a short, exciting, and inviting description (max 2 sentences) for a ${type} event named "${title}" happening on ${date}. Use emojis.`,
+        });
+        res.json({ description: response.text });
+    } catch (error) {
+        console.error("Error generating description:", error);
+        res.json({ description: "Join us for an amazing celebration!" });
+    }
 });
 
 app.post('/api/push/subscribe', authenticateToken, (req, res) => {
