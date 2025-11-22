@@ -208,7 +208,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     public: "Public",
     loginRequired: "Login required for private uploads",
     uploadPrivacy: "Upload Privacy",
-    // --- NEW TRANSLATIONS ---
     myUploads: "My Uploads",
     allPhotos: "All Photos",
     deleteMediaConfirm: "Are you sure you want to delete this media? This cannot be undone.",
@@ -217,7 +216,9 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     scanToView: "Scan to view this live wall",
     untitled: "Untitled",
     by: "by",
-    close: "Close"
+    close: "Close",
+    // NEW
+    findMeDevMode: "⚠️ Experimental Feature: This feature is currently in development."
   },
   mk: {
      // ... existing translations ...
@@ -426,7 +427,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     public: "Јавно",
     loginRequired: "Потребна е најава за приватност",
     uploadPrivacy: "Приватност на прикачување",
-    // --- NEW TRANSLATIONS ---
     myUploads: "Мои прикачувања",
     allPhotos: "Сите фотографии",
     deleteMediaConfirm: "Дали сте сигурни дека сакате да го избришете овој медиум?",
@@ -435,7 +435,9 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     scanToView: "Скенирај за да го видиш овој жив зид",
     untitled: "Без наслов",
     by: "од",
-    close: "Затвори"
+    close: "Затвори",
+    // NEW
+    findMeDevMode: "⚠️ Експериментална функција: Оваа опција е моментално во развој."
   },
   tr: {
     // ... existing translations ...
@@ -644,7 +646,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     public: "Genel",
     loginRequired: "Özel yüklemeler için giriş gerekli",
     uploadPrivacy: "Yükleme Gizliliği",
-    // --- NEW TRANSLATIONS ---
     myUploads: "Yüklemelerim",
     allPhotos: "Tüm Fotoğraflar",
     deleteMediaConfirm: "Bu medyayı silmek istediğinizden emin misiniz?",
@@ -653,7 +654,9 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     scanToView: "Bu canlı duvarı görmek için tarayın",
     untitled: "Başlıksız",
     by: "tarafından",
-    close: "Kapat"
+    close: "Kapat",
+    // NEW
+    findMeDevMode: "⚠️ Deneysel Özellik: Bu özellik şu anda geliştirme aşamasındadır."
   },
   sq: {
     // ... existing translations ...
@@ -862,7 +865,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     public: "Publike",
     loginRequired: "Kërkohet hyrja për ngarkime private",
     uploadPrivacy: "Privatësia e Ngarkimit",
-    // --- NEW TRANSLATIONS ---
     myUploads: "Ngarkimet e Mia",
     allPhotos: "Të Gjitha Fotot",
     deleteMediaConfirm: "A jeni i sigurt se doni të fshini këtë media?",
@@ -871,7 +873,9 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     scanToView: "Skano për të parë këtë mur të gjallë",
     untitled: "Pa Titull",
     by: "nga",
-    close: "Mbyll"
+    close: "Mbyll",
+    // NEW
+    findMeDevMode: "⚠️ Veçori Eksperimentale: Kjo veçori është aktualisht në zhvillim."
   }
 };
 

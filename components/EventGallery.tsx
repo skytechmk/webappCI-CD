@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ShieldCheck, Download, Calendar, LayoutGrid, Camera, Video, Star, Share2, Upload, CheckCircle, Link as LinkIcon, Play, Heart, X, Pause, BookOpen, Send, Lock, Search, ScanFace, Loader2, Trash2, CheckSquare, Square, ChevronLeft, ChevronRight, MessageSquare, Globe } from 'lucide-react';
+import { ShieldCheck, Download, Calendar, LayoutGrid, Camera, Video, Star, Share2, Upload, CheckCircle, Link as LinkIcon, Play, Heart, X, Pause, BookOpen, Send, Lock, Search, ScanFace, Loader2, Trash2, CheckSquare, Square, ChevronLeft, ChevronRight, MessageSquare, Globe, AlertTriangle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Event, User, UserRole, MediaItem, TranslateFn, TierLevel, GuestbookEntry, Comment } from '../types';
 import { api } from '../services/api';
@@ -624,8 +624,13 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
       </div>
 
       {isFindMeOpen && (
-          <div className="bg-white p-4 rounded-2xl shadow-md border border-indigo-100 mb-6 animate-in slide-in-from-top-2 flex flex-col items-center text-center">
-              {/* ... Find Me Content ... */}
+          <div className="bg-white p-4 rounded-2xl shadow-md border border-indigo-100 mb-6 animate-in slide-in-from-top-2 flex flex-col items-center text-center relative overflow-hidden">
+              {/* NEW: Development Warning Banner */}
+              <div className="w-full bg-amber-50 border-b border-amber-100 p-2 mb-4 flex items-center justify-center gap-2 text-amber-700 text-xs font-bold">
+                  <AlertTriangle size={14} />
+                  {t('findMeDevMode')}
+              </div>
+
               <h4 className="font-bold text-slate-900 mb-2">{t('findMeTitle')}</h4>
               <p className="text-sm text-slate-500 mb-4">{t('findMeDesc')}</p>
               {isScanning ? (

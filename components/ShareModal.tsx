@@ -1,6 +1,6 @@
 import React from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { X, Copy, Check, Link as LinkIcon, Download, MessageCircle } from 'lucide-react';
+import { X, Copy, Check, Link as LinkIcon, Download, MessageCircle, Share2 } from 'lucide-react';
 import { TranslateFn } from '../types';
 
 interface ShareModalProps {
@@ -21,6 +21,25 @@ export const ShareModal: React.FC<ShareModalProps> = ({ eventId, eventTitle, onC
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy", err);
+    }
+  };
+
+  // Native Share Handler
+  const handleNativeShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'SnapifY Event',
+          text: `Join the party! ${eventTitle}`,
+          url: eventUrl,
+        });
+      } catch (err) {
+        // User cancelled or failed, fallback logic can go here
+        console.log('Share cancelled');
+      }
+    } else {
+      // Fallback for desktop if they somehow clicked it
+      handleCopy();
     }
   };
 
@@ -61,6 +80,16 @@ export const ShareModal: React.FC<ShareModalProps> = ({ eventId, eventTitle, onC
           </div>
           
           <div className="w-full space-y-3">
+            {/* Native Share Button (Only renders if supported) */}
+            {typeof navigator !== 'undefined' && navigator.share && (
+                <button 
+                  onClick={handleNativeShare}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
+                >
+                    <Share2 size={20} /> Share via...
+                </button>
+            )}
+
             <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
               <LinkIcon size={16} className="text-slate-400 flex-shrink-0" />
               <input 
