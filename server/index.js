@@ -17,6 +17,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
 import webpush from 'web-push'; // Added web-push
+import bcrypt from 'bcrypt'; // SECURITY: Add password hashing
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -24,13 +25,24 @@ const __dirname = path.dirname(__filename);
 
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 3001;
+
+// Security: Require environment variables in production
+if (process.env.NODE_ENV === 'production') {
+    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD || !process.env.JWT_SECRET) {
+        console.error('FATAL: Missing required environment variables in production');
+        process.exit(1);
+    }
+}
+
 const ADMIN_EMAIL = process.env.VITE_ADMIN_EMAIL || 'admin@skytech.mk';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'; 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_in_production_secure_random_string';
-const JWT_EXPIRY = '365d'; // CHANGED: Extended session to 1 year
+const JWT_EXPIRY = '7d'; // SECURITY: Reduced from 365d to 7d for better security
 
-// Domain Management
-const ALLOWED_ORIGINS = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*';
+// Domain Management - SECURITY: Restrict CORS in production
+const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production' 
+    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://snapify.skytech.mk'])
+    : (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*');
 
 // MinIO / S3 Config
 const S3_ENDPOINT = process.env.S3_ENDPOINT || 'http://192.168.20.153:9000';
@@ -289,9 +301,15 @@ io.on('connection', (socket) => {
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
+    // Input validation
+    if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    // Admin login with environment variable check
     if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && password === ADMIN_PASSWORD) {
         const token = jwt.sign({ 
             id: 'admin-system-id', 
@@ -319,9 +337,29 @@ app.post('/api/auth/login', (req, res) => {
         return res.json({ token, user: adminUser });
     }
 
-    db.get("SELECT * FROM users WHERE email = ?", [email], (err, user) => {
+    // Regular user login with password hashing
+    db.get("SELECT * FROM users WHERE email = ?", [email], async (err, user) => {
         if (err) return res.status(500).json({ error: err.message });
-        if (!user) return res.status(401).json({ error: "User not found" });
+        if (!user) return res.status(401).json({ error: "Invalid credentials" });
+
+        // Check if user has a password (for existing users without passwords)
+        if (!user.password) {
+            return res.status(401).json({ error: "Invalid credentials" });
+        }
+
+        // Verify password using bcrypt
+        try {
+            const isValid = await bcrypt.compare(password, user.password);
+            if (!isValid) {
+                return res.status(401).json({ error: "Invalid credentials" });
+            }
+        } catch (bcryptErr) {
+            console.error("Password verification error:", bcryptErr);
+            return res.status(500).json({ error: "Authentication error" });
+        }
+
+        // Remove password from response
+        const { password: _, ...safeUser } = user;
 
         const token = jwt.sign({ 
             id: user.id, 
@@ -329,7 +367,7 @@ app.post('/api/auth/login', (req, res) => {
             email: user.email 
         }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 
-        res.json({ token, user });
+        res.json({ token, user: safeUser });
     });
 });
 
@@ -436,19 +474,42 @@ app.get('/api/users', authenticateToken, (req, res) => {
     });
 });
 
-app.post('/api/users', (req, res) => {
+app.post('/api/users', async (req, res) => {
     const user = req.body;
     const safeRole = 'USER';
     const safeTier = 'FREE';
     const safeStorageLimit = 100; 
 
-    db.get("SELECT * FROM users WHERE email = ?", [user.email], (err, row) => {
+    // Input validation
+    if (!user.email || !user.name) {
+        return res.status(400).json({ error: "Email and name are required" });
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(user.email)) {
+        return res.status(400).json({ error: "Invalid email format" });
+    }
+
+    // Check if user already exists
+    db.get("SELECT * FROM users WHERE email = ?", [user.email], async (err, row) => {
         if (err) return res.status(500).json({ error: err.message });
         if (row) {
-            return res.json(row); 
+            return res.status(409).json({ error: "User already exists" }); 
         } else {
-            const stmt = db.prepare(`INSERT INTO users (id, name, email, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-            stmt.run(user.id, user.name, user.email, safeRole, safeTier, 0, safeStorageLimit, user.joinedDate, user.studioName, function(err) {
+            // Hash password if provided
+            let hashedPassword = null;
+            if (user.password) {
+                try {
+                    hashedPassword = await bcrypt.hash(user.password, 10);
+                } catch (hashErr) {
+                    console.error("Password hashing error:", hashErr);
+                    return res.status(500).json({ error: "Registration failed" });
+                }
+            }
+
+            const stmt = db.prepare(`INSERT INTO users (id, name, email, password, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+            stmt.run(user.id, user.name, user.email, hashedPassword, safeRole, safeTier, 0, safeStorageLimit, user.joinedDate, user.studioName, function(err) {
                 if (err) return res.status(500).json({ error: err.message });
                 
                 const token = jwt.sign({ 
@@ -457,7 +518,8 @@ app.post('/api/users', (req, res) => {
                     email: user.email 
                 }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 
-                const newUser = { ...user, role: safeRole, tier: safeTier, storageUsedMb: 0, storageLimitMb: safeStorageLimit };
+                // Remove password from response
+                const { password: _, ...newUser } = { ...user, role: safeRole, tier: safeTier, storageUsedMb: 0, storageLimitMb: safeStorageLimit };
                 res.json({ token, user: newUser });
             });
             stmt.finalize();
