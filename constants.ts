@@ -110,6 +110,10 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     authErrorFill: "Please fill in all fields",
     authErrorEmail: "This email is already registered",
     authErrorInvalid: "Invalid credentials. Please try again.",
+    authErrorRequired: "Email and password are required",
+    authErrorInvalidEmail: "Please enter a valid email address",
+    authErrorPasswordLength: "Password must be at least 6 characters",
+    authErrorNameRequired: "Name is required and must be at least 2 characters",
     linkCopied: "Link copied to clipboard!",
     salesContactMsg: "Thank you for your interest! Our sales team will contact you shortly to upgrade your plan.",
     adminSettings: "Admin Settings: Expiration",
@@ -234,6 +238,12 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Public Gallery",
     memberLogin: "Login / Sign Up",
     privateUploadsHistory: "Private uploads & event history",
+    
+    // Mobile Contact Options
+    mobileFriendly: "Mobile Optimized",
+    callNow: "Call Now",
+    sendSMS: "Send Text Message",
+    mobileTips: "Mobile Tips: Tap any option above to instantly contact our admin for account upgrades and premium features.",
   },
   mk: {
     // ... existing translations ...
@@ -469,6 +479,12 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Јавна галерија",
     memberLogin: "Најава / Регистрација",
     privateUploadsHistory: "Приватни слики и историја",
+    
+    // Mobile Contact Options
+    mobileFriendly: "Оптимизирано за мобилни",
+    callNow: "Повикај сега",
+    sendSMS: "Испрати порака",
+    mobileTips: "Совети за мобилни: Допри на било која опција за да го контактираш админот за надградба на профилот и премиум функции.",
   },
   tr: {
     // ... existing translations ...
@@ -705,6 +721,12 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Herkese Açık Galeri",
     memberLogin: "Giriş Yap / Kayıt Ol",
     privateUploadsHistory: "Özel yüklemeler ve etkinlik geçmişi",
+    
+    // Mobile Contact Options
+    mobileFriendly: "Mobil Optimize",
+    callNow: "Hemen Ara",
+    sendSMS: "SMS Gönder",
+    mobileTips: "Mobil İpuçları: Hesap yükseltmeleri ve premium özellikler için yöneticimizle anında iletişime geçmek için yukarıdaki herhangi bir seçeneğe dokunun.",
   },
   sq: {
     // ... existing translations ...
@@ -940,6 +962,12 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Galeri Publike",
     memberLogin: "Hyni / Regjistrohuni",
     privateUploadsHistory: "Ngarkime private & historia e ngjarjeve",
+    
+    // Mobile Contact Options
+    mobileFriendly: "Optimizuar për Mobile",
+    callNow: "Thirr Tani",
+    sendSMS: "Dërgo SMS",
+    mobileTips: "Këshilla për Mobile: Prekni çdo opsion për të kontaktuar menjëherë adminin për përmirësime të llogarisë dhe veçori premium.",
   }
 };
 

@@ -31,6 +31,61 @@ import { socketService } from './services/socketService';
 // @ts-ignore
 const env: any = (import.meta as any).env || {};
 
+// Security: API URL configuration
+const API_URL = env.VITE_API_URL || 'http://localhost:3001';
+
+// Security: Input validation helper
+const validateEmail = (email: string): boolean => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
+const sanitizeInput = (input: string): string => {
+  return input.replace(/[<>]/g, '').trim();
+};
+
+// Security: Simple encryption for sensitive localStorage data
+const encryptData = (data: string): string => {
+  // Simple base64 encoding for demonstration
+  // In production, use proper encryption like AES
+  return btoa(encodeURIComponent(data));
+};
+
+const decryptData = (encryptedData: string): string => {
+  try {
+    return decodeURIComponent(atob(encryptedData));
+  } catch {
+    return '';
+  }
+};
+
+// Security: Safe localStorage operations
+const safeSetItem = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, encryptData(value));
+  } catch (error) {
+    console.warn('Failed to save to localStorage:', error);
+  }
+};
+
+const safeGetItem = (key: string): string => {
+  try {
+    const encrypted = localStorage.getItem(key);
+    return encrypted ? decryptData(encrypted) : '';
+  } catch (error) {
+    console.warn('Failed to read from localStorage:', error);
+    return '';
+  }
+};
+
+const safeRemoveItem = (key: string) => {
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.warn('Failed to remove from localStorage:', error);
+  }
+};
+
 declare global {
     interface Window {
         google: any;
@@ -50,7 +105,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   
   // Guest Mode State
-  const [guestName, setGuestName] = useState(() => localStorage.getItem('snapify_guest_name') || '');
+  const [guestName, setGuestName] = useState(() => safeGetItem('snapify_guest_name') || '');
   const [showGuestLogin, setShowGuestLogin] = useState(false);
   const [pendingAction, setPendingAction] = useState<'upload' | 'camera' | null>(null);
 
@@ -300,23 +355,47 @@ export default function App() {
     try {
         const { email, password, name, isPhotographer, studioName } = data;
         
+        // Input validation
+        if (!email || !password) {
+            setAuthError(t('authErrorRequired'));
+            return;
+        }
+        
+        if (!validateEmail(email)) {
+            setAuthError(t('authErrorInvalidEmail'));
+            return;
+        }
+        
+        if (password.length < 6) {
+            setAuthError(t('authErrorPasswordLength'));
+            return;
+        }
+        
         if (isSignUp) {
+            if (!name || name.trim().length < 2) {
+                setAuthError(t('authErrorNameRequired'));
+                return;
+            }
+            
+            const sanitizedName = sanitizeInput(name);
+            const sanitizedStudioName = studioName ? sanitizeInput(studioName) : undefined;
+            
             const newUser: User = {
                 id: `user-${Date.now()}`,
-                name: name,
-                email: email,
+                name: sanitizedName,
+                email: email.toLowerCase().trim(),
                 role: UserRole.USER, 
                 tier: TierLevel.FREE,
                 storageUsedMb: 0,
                 storageLimitMb: 100,
                 joinedDate: new Date().toISOString().split('T')[0],
-                studioName: isPhotographer ? studioName : undefined
+                studioName: isPhotographer ? sanitizedStudioName : undefined
             };
             
             const res = await api.createUser(newUser);
             await finalizeLogin(res.user, res.token);
         } else {
-            const res = await api.login(email, password);
+            const res = await api.login(email.toLowerCase().trim(), password);
             await finalizeLogin(res.user, res.token);
         }
     } catch (e) { 
@@ -329,7 +408,7 @@ export default function App() {
 
   const handleGuestLogin = (name: string) => {
     setGuestName(name);
-    localStorage.setItem('snapify_guest_name', name);
+    safeSetItem('snapify_guest_name', name);
     setShowGuestLogin(false);
     
     // After guest login, ensure we stay on the event view if we have an ID
@@ -618,7 +697,7 @@ export default function App() {
       localStorage.removeItem('snapify_token');
       localStorage.removeItem('snapify_user_id');
       localStorage.removeItem('snapify_user_obj');
-      localStorage.removeItem('snapify_guest_name');
+      safeRemoveItem('snapify_guest_name');
       clearDeviceFingerprint();
       
       // 3. Clean URL
@@ -657,6 +736,13 @@ export default function App() {
       } else {
           localStorage.setItem('snapify_shared_pending', text);
       }
+  };
+
+  // Security: Enhanced error handling for critical operations
+  const handleCriticalError = (error: any, operation: string) => {
+    console.error(`Critical error in ${operation}:`, error);
+    // In production, this could send to error reporting service
+    alert(`An unexpected error occurred during ${operation}. Please try again.`);
   };
 
   return (
