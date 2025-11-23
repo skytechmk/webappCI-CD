@@ -20,6 +20,7 @@ import webpush from 'web-push';
 import bcrypt from 'bcrypt'; 
 import { OAuth2Client } from 'google-auth-library'; 
 import { GoogleGenAI } from "@google/genai"; 
+import crypto from 'crypto'; // Added for randomUUID
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -29,7 +30,6 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3001;
 
 // SECURITY FIX: Strict Environment Check
-// In production, we do NOT want to fallback to default insecure credentials.
 if (process.env.NODE_ENV === 'production') {
     const requiredVars = ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'JWT_SECRET'];
     const missing = requiredVars.filter(key => !process.env[key]);
@@ -40,9 +40,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@skytech.mk';
-// Default password only for dev. In prod, the check above ensures this is set.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'; 
-
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_in_production';
 const JWT_EXPIRY = '7d'; 
 
@@ -99,7 +97,50 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '50mb' })); 
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Authentication Middleware
+// --- SECURITY: Rate Limiters ---
+
+const RateLimitStore = {
+    upload: new Map(),
+    pin: new Map(),
+    
+    // Clean up old entries every hour
+    cleanup: setInterval(() => {
+        RateLimitStore.upload.clear();
+        const now = Date.now();
+        for (const [key, data] of RateLimitStore.pin.entries()) {
+            if (data.resetTime < now) RateLimitStore.pin.delete(key);
+        }
+    }, 3600000)
+};
+
+// Generic Rate Limiter Helper
+const checkRateLimit = (store, key, limit, windowMs) => {
+    const now = Date.now();
+    let record = store.get(key);
+    
+    if (!record || record.resetTime < now) {
+        record = { count: 0, resetTime: now + windowMs };
+        store.set(key, record);
+    }
+    
+    if (record.count >= limit) return false;
+    record.count++;
+    return true;
+};
+
+// Middleware for PIN Brute Force Protection
+const pinRateLimiter = (req, res, next) => {
+    const ip = req.ip || req.connection.remoteAddress;
+    // Limit: 5 attempts per 15 minutes
+    if (!checkRateLimit(RateLimitStore.pin, ip, 5, 15 * 60 * 1000)) {
+        return res.status(429).json({ 
+            error: "Too many failed attempts. Please try again in 15 minutes." 
+        });
+    }
+    next();
+};
+
+// Authentication Middleware (Updated)
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; 
@@ -113,11 +154,27 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
+// Optional Auth Middleware (for Guest Uploads)
+const optionalAuth = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (token) {
+        jwt.verify(token, JWT_SECRET, (err, user) => {
+            if (!err) req.user = user;
+            next();
+        });
+    } else {
+        next();
+    }
+};
+
 // Local Temp Storage
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir);
 } else {
+    // Clean up on start
     fs.readdir(uploadDir, (err, files) => {
         if (!err) {
             for (const file of files) {
@@ -158,15 +215,12 @@ db.serialize(async () => {
         watermarkOffsetY REAL
     )`);
 
-    // SECURITY FIX: Seed Admin with HASHED password
     const adminId = 'admin-system-id';
     const adminName = 'System Admin';
     const joined = new Date().toISOString();
     
     try {
         const hashedAdminPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
-        
-        // Use INSERT OR REPLACE to update password if config changes
         db.run(`INSERT OR REPLACE INTO users (id, name, email, password, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) 
             VALUES (?, ?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`, 
             [adminId, adminName, ADMIN_EMAIL, hashedAdminPassword, joined], (err) => {
@@ -182,6 +236,7 @@ db.serialize(async () => {
         title TEXT,
         description TEXT,
         date TEXT,
+        city TEXT,
         hostId TEXT,
         code TEXT,
         coverImage TEXT,
@@ -193,25 +248,33 @@ db.serialize(async () => {
         FOREIGN KEY(hostId) REFERENCES users(id) ON DELETE CASCADE
     )`);
     
+    // NEW: Vendors Table
+    db.run(`CREATE TABLE IF NOT EXISTS vendors (
+        id TEXT PRIMARY KEY,
+        ownerId TEXT,
+        businessName TEXT,
+        category TEXT,
+        city TEXT,
+        description TEXT,
+        contactEmail TEXT,
+        contactPhone TEXT,
+        website TEXT,
+        instagram TEXT,
+        coverImage TEXT,
+        isVerified INTEGER DEFAULT 0,
+        createdAt TEXT,
+        FOREIGN KEY(ownerId) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+
     db.all("PRAGMA table_info(media)", (err, rows) => {
         if (err) return;
         const hasPrivacy = rows.some(row => row.name === 'privacy');
         if (!hasPrivacy) {
-            console.log("Migrating media table: Adding privacy column...");
-            db.run("ALTER TABLE media ADD COLUMN privacy TEXT DEFAULT 'public'", (err) => {
-                if (err && !err.message.includes('duplicate column name')) {
-                    console.error("Privacy column migration error:", err);
-                }
-            });
+            db.run("ALTER TABLE media ADD COLUMN privacy TEXT DEFAULT 'public'");
         }
         const hasUploaderId = rows.some(row => row.name === 'uploaderId');
         if (!hasUploaderId) {
-            console.log("Migrating media table: Adding uploaderId column...");
-            db.run("ALTER TABLE media ADD COLUMN uploaderId TEXT", (err) => {
-                if (err && !err.message.includes('duplicate column name')) {
-                    console.error("UploaderId column migration error:", err);
-                }
-            });
+            db.run("ALTER TABLE media ADD COLUMN uploaderId TEXT");
         }
     });
 
@@ -253,22 +316,6 @@ db.serialize(async () => {
     )`);
 });
 
-// Rate limiting for media uploads
-const uploadLimits = {
-    uploadCounts: new Map(),
-    resetInterval: setInterval(() => {
-        uploadLimits.uploadCounts.clear();
-    }, 60 * 60 * 1000),
-    isRateLimited: (ip) => {
-        const count = uploadLimits.uploadCounts.get(ip) || 0;
-        return count >= 50; // Max 50 uploads per hour per IP
-    },
-    increment: (ip) => {
-        const count = uploadLimits.uploadCounts.get(ip) || 0;
-        uploadLimits.uploadCounts.set(ip, count + 1);
-    }
-};
-
 // File upload middleware
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
@@ -290,12 +337,15 @@ const upload = multer({
             'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo'
         ];
         
+        // 1. Check MIME type
         if (!allowedMimes.includes(file.mimetype)) {
             return cb(new Error('Invalid file type'), false);
         }
         
+        // 2. Upload Rate Limiting (IP based)
         const clientIP = req.ip || req.connection.remoteAddress;
-        if (uploadLimits.isRateLimited(clientIP)) {
+        // Strict limit: 20 uploads per hour per IP
+        if (!checkRateLimit(RateLimitStore.upload, clientIP, 20, 60 * 60 * 1000)) {
             return cb(new Error('Upload limit exceeded. Please try again later.'), false);
         }
         
@@ -321,6 +371,30 @@ async function uploadToS3(filePath, key, contentType) {
         if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
     }
 }
+
+// --- SOCKET.IO ---
+io.on('connection', (socket) => {
+    socket.on('join_event', (eventId) => {
+        socket.join(eventId);
+    });
+
+    // NEW: Admin Force Reload Listener
+    socket.on('admin_trigger_reload', (token) => {
+        try {
+            const user = jwt.verify(token, JWT_SECRET);
+            if (user.role === 'ADMIN') {
+                console.log(`Admin ${user.id} triggered global reload`);
+                // Broadcast to ALL clients connected
+                io.emit('force_client_reload', { version: Date.now() });
+            }
+        } catch (e) {
+            console.error("Unauthorized reload attempt");
+        }
+    });
+});
+
+
+// --- ROUTES ---
 
 app.get('/api/proxy-media', async (req, res) => {
     const { key } = req.query;
@@ -358,101 +432,48 @@ async function attachPublicUrls(mediaList) {
     }));
 }
 
-io.on('connection', (socket) => {
-    socket.on('join_event', (eventId) => {
-        socket.join(eventId);
-    });
-});
-
 app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
-
-    // Input validation
-    if (!email || !password) {
-        return res.status(400).json({ error: "Email and password are required" });
-    }
-
-    // SECURITY FIX: Removed hardcoded credential check.
-    // Admin is now retrieved from DB and password checked via bcrypt.
+    if (!email || !password) return res.status(400).json({ error: "Required" });
 
     db.get("SELECT * FROM users WHERE email = ?", [email], async (err, user) => {
         if (err) return res.status(500).json({ error: err.message });
-        if (!user) return res.status(401).json({ error: "Invalid credentials" });
+        if (!user || !user.password) return res.status(401).json({ error: "Invalid credentials" });
 
-        // Check if user has a password (for existing users without passwords)
-        if (!user.password) {
-            return res.status(401).json({ error: "Invalid credentials" });
-        }
-
-        // Verify password using bcrypt
         try {
             const isValid = await bcrypt.compare(password, user.password);
-            if (!isValid) {
-                return res.status(401).json({ error: "Invalid credentials" });
-            }
+            if (!isValid) return res.status(401).json({ error: "Invalid credentials" });
         } catch (bcryptErr) {
-            console.error("Password verification error:", bcryptErr);
             return res.status(500).json({ error: "Authentication error" });
         }
 
-        // Remove password from response
         const { password: _, ...safeUser } = user;
-
-        const token = jwt.sign({ 
-            id: user.id, 
-            role: user.role, 
-            email: user.email 
-        }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-
+        const token = jwt.sign({ id: user.id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
         res.json({ token, user: safeUser });
     });
 });
 
-// SECURITY: Google OAuth2 Client for token verification
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// SECURITY: Gemini AI Client (moved from frontend to prevent API key exposure)
 const getGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.warn("Gemini API Key is missing in .env file");
-    return null;
-  }
+  if (!apiKey) return null;
   return new GoogleGenAI({ apiKey });
 };
 
 app.post('/api/auth/google', async (req, res) => {
     const { credential } = req.body;
-    
-    if (!credential) {
-        return res.status(400).json({ error: "Google credential is required" });
-    }
-
-    // Check if Google Client ID is configured
-    if (!process.env.GOOGLE_CLIENT_ID) {
-        console.error("Google Client ID is not configured");
-        return res.status(500).json({ error: "Google authentication is not configured" });
-    }
+    if (!credential) return res.status(400).json({ error: "Required" });
+    if (!process.env.GOOGLE_CLIENT_ID) return res.status(500).json({ error: "Not configured" });
 
     try {
-        // SECURITY: Verify the Google ID token
-        const ticket = await googleClient.verifyIdToken({
-            idToken: credential,
-            audience: process.env.GOOGLE_CLIENT_ID
-        });
-        
+        const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
         const payload = ticket.getPayload();
-        if (!payload) {
-            return res.status(401).json({ error: "Invalid Google token" });
-        }
+        if (!payload || !payload.email) return res.status(401).json({ error: "Invalid Google token" });
 
         const { email, name } = payload;
-        if (!email) {
-            return res.status(400).json({ error: "Email is required" });
-        }
-
         const normalizedEmail = email.toLowerCase();
         const safeRole = 'USER';
         const safeTier = 'FREE';
@@ -462,401 +483,147 @@ app.post('/api/auth/google', async (req, res) => {
             if (err) return res.status(500).json({ error: err.message });
             
             if (row) {
-                const token = jwt.sign({ 
-                    id: row.id, 
-                    role: row.role, 
-                    email: row.email 
-                }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+                const token = jwt.sign({ id: row.id, role: row.role, email: row.email }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
                 return res.json({ token, user: row });
             } else {
                 const newId = `user-${Date.now()}`;
                 const joinedDate = new Date().toISOString().split('T')[0];
-                
                 const stmt = db.prepare(`INSERT INTO users (id, name, email, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
                 stmt.run(newId, name, email, safeRole, safeTier, 0, safeStorageLimit, joinedDate, null, function(err) {
                     if (err) return res.status(500).json({ error: err.message });
-                    
-                    const token = jwt.sign({ 
-                        id: newId, 
-                        role: safeRole, 
-                        email: email 
-                    }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-
-                    const newUser = { 
-                        id: newId, name, email, role: safeRole, tier: safeTier, 
-                        storageUsedMb: 0, storageLimitMb: safeStorageLimit, joinedDate 
-                    };
+                    const token = jwt.sign({ id: newId, role: safeRole, email: email }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+                    const newUser = { id: newId, name, email, role: safeRole, tier: safeTier, storageUsedMb: 0, storageLimitMb: safeStorageLimit, joinedDate };
                     res.json({ token, user: newUser });
                 });
                 stmt.finalize();
             }
         });
     } catch (error) {
-        console.error("Google token verification failed:", error);
-        console.error("Error details:", error.message);
-        return res.status(401).json({ error: "Google authentication failed: " + error.message });
+        return res.status(401).json({ error: "Google authentication failed" });
     }
 });
 
-// SECURITY: Gemini AI endpoints (moved from frontend to prevent API key exposure)
 app.post('/api/ai/generate-caption', authenticateToken, async (req, res) => {
     const { base64Image } = req.body;
-    
-    if (!base64Image) {
-        return res.status(400).json({ error: "Base64 image is required" });
-    }
-
+    if (!base64Image) return res.status(400).json({ error: "Required" });
     const ai = getGeminiClient();
-    if (!ai) {
-        return res.json({ caption: "Event memory" });
-    }
-
+    if (!ai) return res.json({ caption: "Event memory" });
     try {
-        // Clean base64 string if it has data URI prefix
         const cleanBase64 = base64Image.split(',')[1] || base64Image;
-
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: {
-                parts: [
-                    {
-                        inlineData: {
-                            mimeType: 'image/jpeg',
-                            data: cleanBase64
-                        }
-                    },
-                    {
-                        text: "Generate a short caption (max 10 words) for this photo. Include key objects, colors, or the mood (e.g., 'Birthday cake with candles', 'People dancing happily')."
-                    }
-                ]
-            }
+            contents: { parts: [{ inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } }, { text: "Generate a short caption (max 10 words) for this photo." }] }
         });
         res.json({ caption: response.text });
-    } catch (error) {
-        console.error("Error generating caption:", error);
-        res.json({ caption: "Captured moment" });
-    }
+    } catch (error) { res.json({ caption: "Captured moment" }); }
 });
 
 app.post('/api/ai/generate-event-description', authenticateToken, async (req, res) => {
     const { title, date, type } = req.body;
-    
-    if (!title || !date || !type) {
-        return res.status(400).json({ error: "Title, date, and type are required" });
-    }
-
+    if (!title) return res.status(400).json({ error: "Required" });
     const ai = getGeminiClient();
-    if (!ai) {
-        return res.json({ description: "Join us for an amazing celebration!" });
-    }
-
+    if (!ai) return res.json({ description: "Join us!" });
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: `Write a short, exciting, and inviting description (max 2 sentences) for a ${type} event named "${title}" happening on ${date}. Use emojis.`,
+            contents: `Write a short, exciting description (max 2 sentences) for a ${type} event named "${title}" happening on ${date}.`,
         });
         res.json({ description: response.text });
-    } catch (error) {
-        console.error("Error generating description:", error);
-        res.json({ description: "Join us for an amazing celebration!" });
-    }
-});
-
-app.post('/api/push/subscribe', authenticateToken, (req, res) => {
-    res.status(201).json({});
-});
-
-app.post('/api/push/send', authenticateToken, (req, res) => {
-    if (req.user.role !== 'ADMIN') return res.sendStatus(403);
-    res.json({ success: true, message: "Push notifications queued" });
+    } catch (error) { res.json({ description: "Join us!" }); }
 });
 
 app.post('/api/admin/reset', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'ADMIN') {
-        return res.status(403).json({ error: "Unauthorized" });
-    }
-
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: "Unauthorized" });
     const { confirmation } = req.body;
-    if (confirmation !== 'RESET_CONFIRM') {
-        return res.status(400).json({ error: "Invalid confirmation code" });
-    }
-
+    if (confirmation !== 'RESET_CONFIRM') return res.status(400).json({ error: "Invalid code" });
     try {
         db.serialize(async () => {
             db.run("DELETE FROM comments");
             db.run("DELETE FROM guestbook");
             db.run("DELETE FROM media");
             db.run("DELETE FROM events");
+            db.run("DELETE FROM vendors");
             db.run("DELETE FROM users");
-            
             const adminId = 'admin-system-id';
             const adminName = 'System Admin';
             const joined = new Date().toISOString();
-            // Re-seed admin with hashed password
             const hashedAdminPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
-
             db.run(`INSERT OR IGNORE INTO users (id, name, email, password, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) 
                     VALUES (?, ?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`, 
                     [adminId, adminName, ADMIN_EMAIL, hashedAdminPassword, joined]);
         });
-
         fs.readdir(uploadDir, (err, files) => {
-            if (!err) {
-                for (const file of files) {
-                    fs.unlink(path.join(uploadDir, file), () => {});
-                }
-            }
+            if (!err) { for (const file of files) fs.unlink(path.join(uploadDir, file), () => {}); }
         });
-
-        res.json({ success: true, message: "System successfully reset." });
-
-    } catch (error) {
-        res.status(500).json({ error: "Internal Server Error during reset" });
-    }
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: "Reset Error" }); }
 });
 
 app.get('/api/users', authenticateToken, (req, res) => {
     if (req.user.role !== 'ADMIN') return res.sendStatus(403);
-
     db.all("SELECT * FROM users", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
 });
 
-app.post('/api/users', async (req, res) => {
-    const user = req.body;
-    const safeRole = 'USER';
-    const safeTier = 'FREE';
-    const safeStorageLimit = 100; 
-
-    // Input validation
-    if (!user.email || !user.name) {
-        return res.status(400).json({ error: "Email and name are required" });
-    }
-
-    // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(user.email)) {
-        return res.status(400).json({ error: "Invalid email format" });
-    }
-
-    // Check if user already exists
-    db.get("SELECT * FROM users WHERE email = ?", [user.email], async (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (row) {
-            return res.status(409).json({ error: "User already exists" }); 
-        } else {
-            // Hash password if provided
-            let hashedPassword = null;
-            if (user.password) {
-                try {
-                    hashedPassword = await bcrypt.hash(user.password, 10);
-                } catch (hashErr) {
-                    console.error("Password hashing error:", hashErr);
-                    return res.status(500).json({ error: "Registration failed" });
-                }
-            }
-
-            const stmt = db.prepare(`INSERT INTO users (id, name, email, password, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-            stmt.run(user.id, user.name, user.email, hashedPassword, safeRole, safeTier, 0, safeStorageLimit, user.joinedDate, user.studioName, function(err) {
-                if (err) return res.status(500).json({ error: err.message });
-                
-                const token = jwt.sign({ 
-                    id: user.id, 
-                    role: safeRole, 
-                    email: user.email 
-                }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-
-                // Remove password from response
-                const { password: _, ...newUser } = { ...user, role: safeRole, tier: safeTier, storageUsedMb: 0, storageLimitMb: safeStorageLimit };
-                res.json({ token, user: newUser });
-            });
-            stmt.finalize();
-        }
-    });
-});
-
-app.put('/api/users/:id', authenticateToken, (req, res) => {
-    const u = req.body;
-    const targetId = req.params.id;
-
-    if (req.user.id !== targetId && req.user.role !== 'ADMIN') return res.sendStatus(403);
-
-    db.get("SELECT * FROM users WHERE id = ?", [targetId], (err, existingUser) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!existingUser) return res.status(404).json({ error: "User not found" });
-
-        if (u.role !== existingUser.role) {
-            if (req.user.id !== 'admin-system-id') {
-                return res.status(403).json({ error: "Only the Root Admin can change user roles." });
-            }
-        }
-
-        const stmt = db.prepare(`UPDATE users SET name=?, role=?, tier=?, storageUsedMb=?, storageLimitMb=?, studioName=?, logoUrl=?, watermarkOpacity=?, watermarkSize=?, watermarkPosition=?, watermarkOffsetX=?, watermarkOffsetY=? WHERE id=?`);
-        stmt.run(u.name, u.role, u.tier, u.storageUsedMb, u.storageLimitMb, u.studioName, u.logoUrl, u.watermarkOpacity, u.watermarkSize, u.watermarkPosition, u.watermarkOffsetX, u.watermarkOffsetY, targetId, (err) => {
+// VENDOR ROUTES
+app.post('/api/vendors', authenticateToken, async (req, res) => {
+    db.get("SELECT id FROM vendors WHERE ownerId = ?", [req.user.id], (err, row) => {
+        if (row) return res.status(400).json({ error: "Profile exists" });
+        const v = req.body;
+        const vendorId = `vendor-${Date.now()}`;
+        const stmt = db.prepare(`INSERT INTO vendors (id, ownerId, businessName, category, city, description, contactEmail, contactPhone, website, instagram, isVerified, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`);
+        stmt.run(vendorId, req.user.id, v.businessName, v.category, v.city, v.description, v.contactEmail, v.contactPhone, v.website, v.instagram, new Date().toISOString(), (err) => {
             if (err) return res.status(500).json({ error: err.message });
-            io.emit('user_updated', { ...u, id: targetId });
-            res.json({ success: true });
+            res.json({ success: true, vendorId });
         });
         stmt.finalize();
     });
 });
 
-app.delete('/api/users/:id', authenticateToken, (req, res) => {
-    if (req.user.role !== 'ADMIN') return res.sendStatus(403);
-
-    db.run("DELETE FROM users WHERE id=?", req.params.id, (err) => {
+app.get('/api/vendors', (req, res) => {
+    const { city } = req.query;
+    let query = "SELECT * FROM vendors"; 
+    const params = [];
+    if (city) {
+        query += " WHERE lower(city) = ?";
+        params.push(city.toString().toLowerCase());
+    }
+    query += " ORDER BY RANDOM() LIMIT 5"; 
+    db.all(query, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
+        res.json(rows);
     });
 });
 
-// SECURITY FIX: Updated to fetch Host Tier
 app.get('/api/events', authenticateToken, (req, res) => {
     const callerId = req.user.id;
-    const callerRole = req.user.role;
-
-    let query = `
-        SELECT events.*, users.tier as hostTier 
-        FROM events 
-        JOIN users ON events.hostId = users.id 
-        WHERE events.hostId = ?
-    `;
-    let params = [callerId];
-
-    if (callerRole === 'ADMIN') {
-         query = `
-            SELECT events.*, users.tier as hostTier 
-            FROM events 
-            JOIN users ON events.hostId = users.id
-         `;
-         params = [];
-    }
+    const query = req.user.role === 'ADMIN' 
+        ? `SELECT events.*, users.tier as hostTier FROM events JOIN users ON events.hostId = users.id`
+        : `SELECT events.*, users.tier as hostTier FROM events JOIN users ON events.hostId = users.id WHERE events.hostId = ?`;
+    const params = req.user.role === 'ADMIN' ? [] : [callerId];
 
     db.all(query, params, async (err, events) => {
         if (err) return res.status(500).json({ error: err.message });
         try {
-            const detailedEvents = await Promise.all(events.map(async (evt) => {
+            const detailed = await Promise.all(events.map(async (evt) => {
                 const media = await new Promise(resolve => db.all("SELECT * FROM media WHERE eventId = ? ORDER BY uploadedAt DESC", [evt.id], (err, rows) => resolve(rows || [])));
-                const guestbook = await new Promise(resolve => db.all("SELECT * FROM guestbook WHERE eventId = ? ORDER BY createdAt DESC", [evt.id], (err, rows) => resolve(rows || [])));
-                const comments = await new Promise(resolve => db.all("SELECT * FROM comments WHERE eventId = ? ORDER BY createdAt ASC", [evt.id], (err, rows) => resolve(rows || [])));
-                
                 const signedMedia = await attachPublicUrls(media);
-                const mediaWithComments = signedMedia.map(m => ({
-                    ...m,
-                    comments: comments.filter(c => c.mediaId === m.id)
-                }));
-
                 let signedCover = evt.coverImage;
                 if (evt.coverImage && !evt.coverImage.startsWith('http')) signedCover = getPublicUrl(evt.coverImage);
-
-                return { ...evt, media: mediaWithComments, guestbook, coverImage: signedCover, hasPin: !!evt.pin };
+                return { ...evt, media: signedMedia, coverImage: signedCover, hasPin: !!evt.pin };
             }));
-            res.json(detailedEvents);
-        } catch (e) {
-            res.status(500).json({ error: 'Failed to retrieve event data' });
-        }
-    });
-});
-
-// SECURITY FIX: Updated to fetch Host Tier
-app.get('/api/events/:id', (req, res) => {
-    const query = `
-        SELECT events.*, users.tier as hostTier 
-        FROM events 
-        JOIN users ON events.hostId = users.id 
-        WHERE events.id = ?
-    `;
-
-    db.get(query, [req.params.id], async (err, event) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!event) return res.status(404).json({ error: 'Event not found' });
-
-        // SECURITY FIX: Check for Expiration
-        if (event.expiresAt && new Date() > new Date(event.expiresAt)) {
-            const authHeader = req.headers['authorization'];
-            let isAuthorizedExpired = false;
-            
-            if (authHeader) {
-                const token = authHeader.split(' ')[1];
-                try {
-                    const user = jwt.verify(token, JWT_SECRET);
-                    if (user.role === 'ADMIN' || user.id === event.hostId) {
-                        isAuthorizedExpired = true;
-                    }
-                } catch (e) {}
-            }
-
-            if (!isAuthorizedExpired) {
-                return res.status(403).json({ error: 'Event expired' });
-            }
-        }
-
-        // SECURITY: Check if user is authorized to see the PIN
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
-        let isAuthorized = false;
-
-        if (token) {
-            try {
-                const user = jwt.verify(token, JWT_SECRET);
-                if (user.role === 'ADMIN' || user.id === event.hostId) {
-                    isAuthorized = true;
-                }
-            } catch (e) {
-                // ignore invalid token
-            }
-        }
-
-        const eventResponse = { ...event };
-        if (!isAuthorized) {
-            eventResponse.hasPin = !!eventResponse.pin; // Flag for frontend to show lock screen
-            delete eventResponse.pin; // Remove PIN from response
-        } else {
-            eventResponse.hasPin = !!eventResponse.pin;
-        }
-
-        try {
-            const media = await new Promise(resolve => db.all("SELECT * FROM media WHERE eventId = ? ORDER BY uploadedAt DESC", [req.params.id], (err, rows) => resolve(rows || [])));
-            const guestbook = await new Promise(resolve => db.all("SELECT * FROM guestbook WHERE eventId = ? ORDER BY createdAt DESC", [req.params.id], (err, rows) => resolve(rows || [])));
-            const comments = await new Promise(resolve => db.all("SELECT * FROM comments WHERE eventId = ? ORDER BY createdAt ASC", [req.params.id], (err, rows) => resolve(rows || [])));
-            
-            const signedMedia = await attachPublicUrls(media);
-            const mediaWithComments = signedMedia.map(m => ({
-                ...m,
-                comments: comments.filter(c => c.mediaId === m.id)
-            }));
-
-            let signedCover = event.coverImage;
-            if (event.coverImage && !event.coverImage.startsWith('http')) signedCover = getPublicUrl(event.coverImage);
-
-            res.json({ ...eventResponse, media: mediaWithComments, guestbook, coverImage: signedCover });
-        } catch (e) {
-            res.status(500).json({ error: 'Failed to retrieve event data' });
-        }
-    });
-});
-
-app.post('/api/events/:id/validate-pin', (req, res) => {
-    const { pin } = req.body;
-    // This route is secure because it compares on the server-side
-    db.get("SELECT pin FROM events WHERE id = ?", [req.params.id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: "Event not found" });
-        
-        // If pin matches or if event has no pin (null/empty), return success
-        const isValid = !row.pin || row.pin === pin;
-        res.json({ success: isValid });
+            res.json(detailed);
+        } catch (e) { res.status(500).json({ error: 'Failed' }); }
     });
 });
 
 app.post('/api/events', authenticateToken, (req, res) => {
     const e = req.body;
     if (e.hostId !== req.user.id && req.user.role !== 'ADMIN') return res.sendStatus(403);
-
-    const stmt = db.prepare(`INSERT INTO events (id, title, description, date, hostId, code, expiresAt, pin, views, downloads) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    stmt.run(e.id, e.title, e.description, e.date, e.hostId, e.code, e.expiresAt, e.pin, 0, 0, (err) => {
+    const stmt = db.prepare(`INSERT INTO events (id, title, description, date, city, hostId, code, expiresAt, pin, views, downloads) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    stmt.run(e.id, e.title, e.description, e.date, e.city || null, e.hostId, e.code, e.expiresAt, e.pin, 0, 0, (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(e);
     });
@@ -866,13 +633,8 @@ app.post('/api/events', authenticateToken, (req, res) => {
 app.put('/api/events/:id', authenticateToken, (req, res) => {
     const e = req.body;
     db.get("SELECT hostId FROM events WHERE id = ?", [req.params.id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: "Event not found" });
-
-        if (row.hostId !== req.user.id && req.user.role !== 'ADMIN') {
-            return res.sendStatus(403);
-        }
-
+        if (!row) return res.status(404).json({ error: "Not found" });
+        if (row.hostId !== req.user.id && req.user.role !== 'ADMIN') return res.sendStatus(403);
         const stmt = db.prepare(`UPDATE events SET title=?, description=?, coverImage=?, coverMediaType=?, expiresAt=?, views=?, downloads=? WHERE id=?`);
         stmt.run(e.title, e.description, e.coverImage, e.coverMediaType, e.expiresAt, e.views, e.downloads, req.params.id, (err) => {
             if (err) return res.status(500).json({ error: err.message });
@@ -884,13 +646,8 @@ app.put('/api/events/:id', authenticateToken, (req, res) => {
 
 app.delete('/api/events/:id', authenticateToken, (req, res) => {
     db.get("SELECT hostId FROM events WHERE id = ?", [req.params.id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: "Event not found" });
-
-        if (row.hostId !== req.user.id && req.user.role !== 'ADMIN') {
-            return res.sendStatus(403);
-        }
-
+        if (!row) return res.status(404).json({ error: "Not found" });
+        if (row.hostId !== req.user.id && req.user.role !== 'ADMIN') return res.sendStatus(403);
         db.run("DELETE FROM events WHERE id=?", req.params.id, (err) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ success: true });
@@ -898,31 +655,14 @@ app.delete('/api/events/:id', authenticateToken, (req, res) => {
     });
 });
 
-app.post('/api/guestbook', (req, res) => {
-    const g = req.body;
-    const stmt = db.prepare(`INSERT INTO guestbook (id, eventId, senderName, message, createdAt) VALUES (?, ?, ?, ?, ?)`);
-    stmt.run(g.id, g.eventId, g.senderName, g.message, g.createdAt, (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        io.to(g.eventId).emit('new_message', g);
-        res.json(g);
-    });
-    stmt.finalize();
-});
-
-app.post('/api/comments', (req, res) => {
-    const c = req.body;
-    const stmt = db.prepare(`INSERT INTO comments (id, mediaId, eventId, senderName, text, createdAt) VALUES (?, ?, ?, ?, ?, ?)`);
-    stmt.run(c.id, c.mediaId, c.eventId, c.senderName, c.text, c.createdAt, (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        io.to(c.eventId).emit('new_comment', c);
-        res.json(c);
-    });
-    stmt.finalize();
-});
-
-app.post('/api/media', upload.single('file'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+app.post('/api/media', optionalAuth, upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file' });
     const body = req.body;
+    if (req.user) {
+        if (body.uploaderId !== req.user.id) return res.status(403).json({ error: "Identity mismatch" });
+    } else {
+        if (!body.uploaderId || !body.uploaderId.startsWith('guest-')) body.uploaderId = `guest-anon-${Date.now()}`;
+    }
     const isVideo = body.type === 'video';
     const ext = path.extname(req.file.originalname);
     const s3Key = `events/${body.eventId}/${body.id}${ext}`;
@@ -933,180 +673,181 @@ app.post('/api/media', upload.single('file'), async (req, res) => {
             const previewFilename = `thumb_${path.parse(req.file.filename).name}.jpg`;
             const previewPath = path.join(uploadDir, previewFilename);
             const previewKey = `events/${body.eventId}/thumb_${body.id}.jpg`;
-
-            await sharp(req.file.path)
-                .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
-                .jpeg({ quality: 80 })
-                .toFile(previewPath);
-
-            await Promise.all([
-                uploadToS3(req.file.path, s3Key, req.file.mimetype),
-                uploadToS3(previewPath, previewKey, 'image/jpeg')
-            ]);
-
+            await sharp(req.file.path).resize(400, 400, { fit: 'inside' }).jpeg({ quality: 80 }).toFile(previewPath);
+            await Promise.all([uploadToS3(req.file.path, s3Key, req.file.mimetype), uploadToS3(previewPath, previewKey, 'image/jpeg')]);
             fs.unlink(previewPath, () => {});
-
-            stmt.run(body.id, body.eventId, body.type, s3Key, previewKey, 0, body.caption, body.uploadedAt, body.uploaderName, body.uploaderId || null, body.isWatermarked === 'true' ? 1 : 0, body.watermarkText, 0, body.privacy || 'public', async (err) => {
-                if (err) return res.status(500).json({ error: err.message });
-                
-                const publicUrl = getPublicUrl(s3Key);
-                const publicPreview = getPublicUrl(previewKey);
-                
-                const mediaItem = { 
-                    id: body.id, 
-                    eventId: body.eventId, 
-                    url: publicUrl, 
-                    previewUrl: publicPreview, 
-                    type: body.type, 
-                    caption: body.caption, 
-                    isProcessing: false, 
-                    uploadedAt: body.uploadedAt, 
-                    uploaderName: body.uploaderName, 
-                    likes: 0, 
-                    comments: [],
-                    privacy: body.privacy || 'public'
-                };
-                io.to(body.eventId).emit('media_uploaded', mediaItem);
-                res.json(mediaItem);
+            stmt.run(body.id, body.eventId, body.type, s3Key, previewKey, 0, body.caption, body.uploadedAt, body.uploaderName, body.uploaderId, body.isWatermarked === 'true' ? 1 : 0, body.watermarkText, 0, body.privacy || 'public', (err) => {
+                const item = { id: body.id, eventId: body.eventId, url: getPublicUrl(s3Key), previewUrl: getPublicUrl(previewKey), type: body.type, caption: body.caption, isProcessing: false, uploadedAt: body.uploadedAt, uploaderName: body.uploaderName, likes: 0, comments: [], privacy: body.privacy || 'public' };
+                io.to(body.eventId).emit('media_uploaded', item);
+                res.json(item);
             });
             stmt.finalize();
-        } catch (e) { 
-            console.error("Upload/Sharp Error", e);
-            res.status(500).json({ error: e.message }); 
-        }
+        } catch (e) { res.status(500).json({ error: e.message }); }
     } else {
-        stmt.run(body.id, body.eventId, body.type, s3Key, '', 1, body.caption, body.uploadedAt, body.uploaderName, body.uploaderId || null, body.isWatermarked === 'true' ? 1 : 0, body.watermarkText, 0, body.privacy || 'public', (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            const mediaItem = { id: body.id, eventId: body.eventId, url: '', type: body.type, caption: body.caption, isProcessing: true, uploadedAt: body.uploadedAt, uploaderName: body.uploaderName, likes: 0, comments: [], privacy: body.privacy || 'public' };
-            io.to(body.eventId).emit('media_uploaded', mediaItem);
-            res.json(mediaItem);
-
+        stmt.run(body.id, body.eventId, body.type, s3Key, '', 1, body.caption, body.uploadedAt, body.uploaderName, body.uploaderId, body.isWatermarked === 'true' ? 1 : 0, body.watermarkText, 0, body.privacy || 'public', (err) => {
+            const item = { id: body.id, eventId: body.eventId, url: '', type: body.type, caption: body.caption, isProcessing: true, uploadedAt: body.uploadedAt, uploaderName: body.uploaderName, likes: 0, comments: [], privacy: body.privacy || 'public' };
+            io.to(body.eventId).emit('media_uploaded', item);
+            res.json(item);
             const processVideo = async () => {
                 const inputPath = req.file.path;
-                
-                // SECURITY FIX: Ensure inputPath is safe (though req.file.path from multer is generally safe)
-                if (!inputPath.startsWith(uploadDir)) {
-                    console.error("Invalid file path for FFmpeg");
-                    return;
-                }
-
-                const outputFilename = `preview_${path.parse(req.file.filename).name}.mp4`;
-                const outputPath = path.join(uploadDir, outputFilename);
+                if (!inputPath.startsWith(uploadDir)) return;
+                const outputPath = path.join(uploadDir, `preview_${path.parse(req.file.filename).name}.mp4`);
                 const previewKey = `events/${body.eventId}/preview_${body.id}.mp4`;
-
-                return new Promise((resolve, reject) => {
-                    const ffmpeg = spawn('ffmpeg', ['-i', inputPath, '-vf', 'scale=-2:720', '-c:v', 'libx264', '-crf', '23', '-preset', 'fast', '-c:a', 'aac', '-b:a', '128k', '-y', outputPath]);
-                    ffmpeg.on('close', async (code) => {
-                        if (code === 0) {
-                            try {
-                                await Promise.all([uploadToS3(inputPath, s3Key, req.file.mimetype), uploadToS3(outputPath, previewKey, 'video/mp4')]);
-                                db.run("UPDATE media SET isProcessing = 0, previewUrl = ? WHERE id = ?", [previewKey, body.id], async (err) => {
-                                    if (!err) {
-                                        const publicPreview = getPublicUrl(previewKey);
-                                        const publicOriginal = getPublicUrl(s3Key);
-                                        io.to(body.eventId).emit('media_processed', { id: body.id, previewUrl: publicPreview, url: publicOriginal });
-                                    }
-                                });
-                                resolve();
-                            } catch (e) { reject(e); }
-                        } else {
-                            if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-                            reject("FFmpeg Error");
-                        }
-                    });
+                const ffmpeg = spawn('ffmpeg', ['-i', inputPath, '-vf', 'scale=-2:720', '-c:v', 'libx264', '-crf', '23', '-preset', 'fast', '-c:a', 'aac', '-b:a', '128k', '-y', outputPath]);
+                ffmpeg.on('close', async (code) => {
+                    if (code === 0) {
+                        try {
+                            await Promise.all([uploadToS3(inputPath, s3Key, req.file.mimetype), uploadToS3(outputPath, previewKey, 'video/mp4')]);
+                            db.run("UPDATE media SET isProcessing = 0, previewUrl = ? WHERE id = ?", [previewKey, body.id], () => {
+                                io.to(body.eventId).emit('media_processed', { id: body.id, previewUrl: getPublicUrl(previewKey), url: getPublicUrl(s3Key) });
+                            });
+                        } catch (e) {}
+                    }
+                    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
                 });
             };
-            
             processVideo().catch(console.error);
         });
         stmt.finalize();
     }
 });
 
-app.put('/api/media/:id/like', (req, res) => {
-    db.run("UPDATE media SET likes = likes + 1 WHERE id = ?", req.params.id, function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        db.get("SELECT eventId, likes FROM media WHERE id = ?", req.params.id, (err, row) => {
-            if (row) io.to(row.eventId).emit('new_like', { id: req.params.id, likes: row.likes });
-        });
-        res.json({ success: true });
-    });
-});
-
 app.delete('/api/media/:id', authenticateToken, (req, res) => {
-    const query = `
-        SELECT media.url, media.previewUrl, events.hostId, media.uploaderId 
-        FROM media 
-        JOIN events ON media.eventId = events.id 
-        WHERE media.id = ?
-    `;
-    
-    db.get(query, [req.params.id], async (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: "Media not found" });
-
-        const isAuthorized = req.user.role === 'ADMIN' || 
-                           row.hostId === req.user.id || 
-                           row.uploaderId === req.user.id;
-        
-        if (!isAuthorized) {
-            return res.sendStatus(403);
-        }
-
+    db.get(`SELECT media.url, media.previewUrl, events.hostId, media.uploaderId FROM media JOIN events ON media.eventId = events.id WHERE media.id = ?`, [req.params.id], async (err, row) => {
+        if (err || !row) return res.status(404).json({ error: "Not found" });
+        if (req.user.role !== 'ADMIN' && row.hostId !== req.user.id && row.uploaderId !== req.user.id) return res.sendStatus(403);
         try {
             if (row.url) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.url }));
             if (row.previewUrl) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.previewUrl }));
-        } catch (e) { console.error("S3 Delete Error:", e.message); }
+        } catch (e) {}
+        db.run("DELETE FROM media WHERE id = ?", req.params.id, (err) => res.json({ success: true }));
+    });
+});
 
-        db.run("DELETE FROM media WHERE id = ?", req.params.id, (err) => {
+app.put('/api/media/:id/like', (req, res) => {
+    const stmt = db.prepare("UPDATE media SET likes = likes + 1 WHERE id = ?");
+    stmt.run(req.params.id, function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        db.get("SELECT likes FROM media WHERE id = ?", [req.params.id], (err, row) => {
+            if (row) {
+                io.to(row.eventId).emit('new_like', { id: req.params.id, likes: row.likes });
+                res.json({ success: true, likes: row.likes });
+            } else {
+                res.status(404).json({ error: "Media not found" });
+            }
+        });
+    });
+    stmt.finalize();
+});
+
+app.post('/api/guestbook', async (req, res) => {
+    const { eventId, senderName, message, createdAt } = req.body;
+    const id = crypto.randomUUID();
+    const stmt = db.prepare("INSERT INTO guestbook (id, eventId, senderName, message, createdAt) VALUES (?, ?, ?, ?, ?)");
+    stmt.run(id, eventId, senderName, message, createdAt, (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const entry = { id, eventId, senderName, message, createdAt };
+        io.to(eventId).emit('new_message', entry);
+        res.json(entry);
+    });
+    stmt.finalize();
+});
+
+app.post('/api/comments', async (req, res) => {
+    const { mediaId, eventId, senderName, text, createdAt } = req.body;
+    const id = crypto.randomUUID();
+    const stmt = db.prepare("INSERT INTO comments (id, mediaId, eventId, senderName, text, createdAt) VALUES (?, ?, ?, ?, ?, ?)");
+    stmt.run(id, mediaId, eventId, senderName, text, createdAt, (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const comment = { id, mediaId, eventId, senderName, text, createdAt };
+        io.to(eventId).emit('new_comment', comment);
+        res.json(comment);
+    });
+    stmt.finalize();
+});
+
+app.post('/api/events/:id/validate-pin', pinRateLimiter, (req, res) => {
+    const { pin } = req.body;
+    db.get("SELECT pin FROM events WHERE id = ?", [req.params.id], (err, row) => {
+        if (!row) return res.status(404).json({ error: "Not found" });
+        res.json({ success: !row.pin || row.pin === pin });
+    });
+});
+
+app.post('/api/media/bulk-delete', authenticateToken, async (req, res) => {
+    const { mediaIds } = req.body;
+    if (!Array.isArray(mediaIds) || mediaIds.length === 0) return res.status(400).json({ error: "No media IDs provided" });
+
+    const placeholders = mediaIds.map(() => '?').join(',');
+    const query = `SELECT media.id, media.url, media.previewUrl, events.hostId, media.uploaderId, media.eventId FROM media JOIN events ON media.eventId = events.id WHERE media.id IN (${placeholders})`;
+
+    db.all(query, mediaIds, async (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        let deletedCount = 0;
+        const deletePromises = rows.map(async (row) => {
+            // Auth check per item
+            if (req.user.role !== 'ADMIN' && row.hostId !== req.user.id && row.uploaderId !== req.user.id) {
+                return; 
+            }
+
+            try {
+                if (row.url) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.url }));
+                if (row.previewUrl) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.previewUrl }));
+                
+                await new Promise((resolve, reject) => {
+                    db.run("DELETE FROM media WHERE id = ?", [row.id], (err) => {
+                        if (err) reject(err);
+                        else {
+                            deletedCount++;
+                            resolve(true);
+                        }
+                    });
+                });
+            } catch (e) {
+                console.error(`Failed to delete media ${row.id}`, e);
+            }
+        });
+
+        await Promise.all(deletePromises);
+        res.json({ success: true, deletedCount });
+    });
+});
+
+// --- Database Management Routes (Admin Only) ---
+
+app.put('/api/users/:id', authenticateToken, (req, res) => {
+    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) return res.sendStatus(403);
+    const u = req.body;
+    const stmt = db.prepare("UPDATE users SET name=?, email=?, role=?, tier=?, storageUsedMb=?, storageLimitMb=?, studioName=?, logoUrl=?, watermarkOpacity=?, watermarkSize=?, watermarkPosition=?, watermarkOffsetX=?, watermarkOffsetY=? WHERE id=?");
+    stmt.run(u.name, u.email, u.role, u.tier, u.storageUsedMb, u.storageLimitMb, u.studioName, u.logoUrl, u.watermarkOpacity, u.watermarkSize, u.watermarkPosition, u.watermarkOffsetX, u.watermarkOffsetY, req.params.id, (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        // Notify connected clients if user data changed (e.g. storage update)
+        io.emit('user_updated', u);
+        res.json({ success: true });
+    });
+    stmt.finalize();
+});
+
+app.delete('/api/users/:id', authenticateToken, (req, res) => {
+    if (req.user.role !== 'ADMIN') return res.sendStatus(403);
+    // Cascading delete handles events/media via SQL foreign keys, but we should clean up S3
+    // 1. Get all media for user's events
+    db.all("SELECT url, previewUrl FROM media WHERE eventId IN (SELECT id FROM events WHERE hostId = ?)", [req.params.id], async (err, rows) => {
+        if (!err && rows) {
+            for (const row of rows) {
+                try {
+                    if (row.url) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.url }));
+                    if (row.previewUrl) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.previewUrl }));
+                } catch (e) {}
+            }
+        }
+        db.run("DELETE FROM users WHERE id = ?", req.params.id, (err) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ success: true });
         });
     });
 });
-
-app.post('/api/media/bulk-delete', authenticateToken, (req, res) => {
-    const { mediaIds } = req.body;
-    if (!mediaIds || !Array.isArray(mediaIds) || mediaIds.length === 0) return res.status(400).json({ error: 'Invalid media IDs' });
-
-    if (req.user.role === 'ADMIN') {
-        processBulkDelete(mediaIds, res);
-    } else {
-        const placeholders = mediaIds.map(() => '?').join(',');
-        const checkQuery = `
-            SELECT DISTINCT events.hostId 
-            FROM media 
-            JOIN events ON media.eventId = events.id 
-            WHERE media.id IN (${placeholders})
-        `;
-        
-        db.all(checkQuery, mediaIds, (err, rows) => {
-            if (err) return res.status(500).json({ error: err.message });
-            
-            const isAuthorized = rows.every(row => row.hostId === req.user.id);
-            if (!isAuthorized) return res.sendStatus(403);
-
-            processBulkDelete(mediaIds, res);
-        });
-    }
-});
-
-function processBulkDelete(mediaIds, res) {
-    const placeholders = mediaIds.map(() => '?').join(',');
-    db.all(`SELECT id, url, previewUrl FROM media WHERE id IN (${placeholders})`, mediaIds, async (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        for (const row of rows) {
-            try {
-                if (row.url) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.url }));
-                if (row.previewUrl) await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: row.previewUrl }));
-            } catch (e) { console.error("S3 Delete Error:", e.message); }
-        }
-        db.run(`DELETE FROM media WHERE id IN (${placeholders})`, mediaIds, (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true, deletedCount: mediaIds.length });
-        });
-    });
-}
 
 server.listen(PORT, () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);

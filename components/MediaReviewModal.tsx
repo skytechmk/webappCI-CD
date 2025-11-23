@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, RotateCcw, Type, Send, Loader2, Lock, Globe, AlertCircle } from 'lucide-react';
 import { TranslateFn } from '../types';
+import { getExifOrientation } from '../utils/imageProcessing';
 
 interface MediaReviewModalProps {
   type: 'image' | 'video';
@@ -9,9 +10,10 @@ interface MediaReviewModalProps {
   onRetake: () => void;
   onCancel: () => void;
   isUploading: boolean;
-  uploadProgress?: number; // NEW PROP
+  uploadProgress?: number; 
   isRegistered: boolean; 
   t: TranslateFn;
+  file?: File; // Pass the file object to check EXIF
 }
 
 export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
@@ -21,12 +23,28 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
   onRetake,
   onCancel,
   isUploading,
-  uploadProgress = 0, // Default to 0
+  uploadProgress = 0, 
   isRegistered,
-  t
+  t,
+  file
 }) => {
   const [caption, setCaption] = useState('');
   const [privacy, setPrivacy] = useState<'public' | 'private'>('public');
+  const [rotation, setRotation] = useState(0);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    if (type === 'image' && file) {
+        getExifOrientation(file).then((orientation) => {
+            switch (orientation) {
+                case 3: setRotation(180); break;
+                case 6: setRotation(90); break;
+                case 8: setRotation(-90); break;
+                default: setRotation(0); break;
+            }
+        });
+    }
+  }, [file, type]);
 
   const handlePrivacyChange = (newPrivacy: 'public' | 'private') => {
       if (newPrivacy === 'private' && !isRegistered) {
@@ -64,9 +82,11 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
           />
         ) : (
           <img 
+            ref={imgRef}
             src={src} 
             alt="Preview" 
-            className="max-w-full max-h-full object-contain" 
+            className="max-w-full max-h-full object-contain transition-transform duration-300" 
+            style={{ transform: `rotate(${rotation}deg)` }}
           />
         )}
       </div>

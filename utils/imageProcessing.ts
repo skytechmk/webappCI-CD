@@ -1,4 +1,6 @@
 import { WatermarkPosition } from '../types';
+// @ts-ignore
+import EXIF from 'exif-js';
 
 // Helper to load image
 const loadImage = (src: string): Promise<HTMLImageElement> => {
@@ -9,6 +11,54 @@ const loadImage = (src: string): Promise<HTMLImageElement> => {
         img.onerror = reject;
         img.src = src;
     });
+};
+
+// NEW: Helper to extract GPS from File
+export const getGPSFromImage = (file: File): Promise<{ lat: number, lng: number } | null> => {
+    return new Promise((resolve) => {
+        try {
+            EXIF.getData(file as any, function(this: any) {
+                const lat = EXIF.getTag(this, "GPSLatitude");
+                const latRef = EXIF.getTag(this, "GPSLatitudeRef");
+                const lng = EXIF.getTag(this, "GPSLongitude");
+                const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
+
+                if (lat && latRef && lng && lngRef) {
+                    const latitude = convertDMSToDD(lat[0], lat[1], lat[2], latRef);
+                    const longitude = convertDMSToDD(lng[0], lng[1], lng[2], lngRef);
+                    resolve({ lat: latitude, lng: longitude });
+                } else {
+                    resolve(null);
+                }
+            });
+        } catch (e) {
+            console.warn("EXIF extraction failed", e);
+            resolve(null);
+        }
+    });
+};
+
+// NEW: Helper to get EXIF Orientation
+export const getExifOrientation = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+        try {
+            EXIF.getData(file as any, function(this: any) {
+                const orientation = EXIF.getTag(this, "Orientation");
+                resolve(orientation || 1);
+            });
+        } catch (e) {
+            resolve(1);
+        }
+    });
+};
+
+// Helper to convert DMS (Degrees, Minutes, Seconds) to Decimal Degrees
+const convertDMSToDD = (degrees: number, minutes: number, seconds: number, direction: string): number => {
+    let dd = degrees + minutes / 60 + seconds / (60 * 60);
+    if (direction === "S" || direction === "W") {
+        dd = dd * -1;
+    }
+    return dd;
 };
 
 export const applyWatermark = async (

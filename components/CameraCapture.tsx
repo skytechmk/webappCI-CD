@@ -51,17 +51,20 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onClose
     }
 
     try {
+      // FIX: Detect orientation to request correct aspect ratio
+      const isPortrait = window.innerHeight > window.innerWidth;
+
       // iOS Safari requires specific resolution constraints to trigger high-quality video
-      // Android/Chrome can use ImageCapture to get high-res photos even from 1080p stream
+      // We strictly swap width/height ideals based on current screen orientation
       const constraints: MediaStreamConstraints = {
         audio: mode === 'video',
         video: {
           facingMode: useFront ? 'user' : { exact: 'environment' },
-          // Request 4K ideal to force highest resolution available
-          width: { ideal: 4096 },
-          height: { ideal: 2160 },
-          // Prefer native mobile aspect ratio
-          aspectRatio: { ideal: window.innerHeight / window.innerWidth }
+          // Request high res, but respect orientation
+          width: { ideal: isPortrait ? 2160 : 4096 },
+          height: { ideal: isPortrait ? 4096 : 2160 },
+          // Important: Explicitly prefer the screen's aspect ratio
+          aspectRatio: { ideal: isPortrait ? window.innerHeight / window.innerWidth : window.innerWidth / window.innerHeight }
         }
       };
 
@@ -200,9 +203,9 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onClose
 
     try {
         // METHOD 1: Native ImageCapture (High Res - Android)
+        // This usually respects device orientation metadata automatically
         if (imageCaptureRef.current) {
             try {
-                // If torch is on, ensure it stays on during capture or use red-eye reduction if supported
                 const blob = await imageCaptureRef.current.takePhoto();
                 const url = URL.createObjectURL(blob);
                 return url;
@@ -216,7 +219,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onClose
             const video = videoRef.current;
             const canvas = canvasRef.current;
             
-            // Capture at actual video resolution
+            // Capture the current video dimensions (which should now be correct due to constraints)
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             
@@ -241,7 +244,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onClose
   const handleCapture = async () => {
       const img = await takePhoto();
       if (img) {
-          // Turn off torch after capture if it was on (optional UX choice, often good to save battery)
+          // Turn off torch after capture if it was on
           if (torch) toggleTorch(); 
           onCapture(img);
       }

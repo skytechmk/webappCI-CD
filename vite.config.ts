@@ -6,10 +6,10 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate', // Automatically update the SW
+      registerType: 'autoUpdate', 
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       devOptions: {
-        enabled: true // Enable PWA in dev mode for testing
+        enabled: true 
       },
       manifest: {
         name: 'SnapifY - Event Sharing',
@@ -51,9 +51,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        // Force waiting to false ensures the new SW takes over immediately
         skipWaiting: true,
         clientsClaim: true,
+        cleanupOutdatedCaches: true, // FORCE CLEANUP
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.includes('/api/proxy-media') || url.pathname.includes('/api/media'),

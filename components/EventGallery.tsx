@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ShieldCheck, Download, Calendar, LayoutGrid, Camera, Video, Star, Share2, Upload, CheckCircle, Link as LinkIcon, Play, Heart, X, Pause, BookOpen, Send, Lock, Search, ScanFace, Loader2, Trash2, CheckSquare, Square, ChevronLeft, ChevronRight, MessageSquare, Globe, AlertTriangle, Plus, ImagePlus } from 'lucide-react';
+import { ShieldCheck, Download, Calendar, LayoutGrid, Camera, Video, Star, Share2, Upload, CheckCircle, Link as LinkIcon, Play, Heart, X, Pause, BookOpen, Send, Lock, Search, ScanFace, Loader2, Trash2, CheckSquare, Square, ChevronLeft, ChevronRight, MessageSquare, Globe, AlertTriangle, Plus, ImagePlus, MapPin } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Event, User, UserRole, MediaItem, TranslateFn, TierLevel, GuestbookEntry, Comment } from '../types';
+import { Event, User, UserRole, MediaItem, TranslateFn, TierLevel, GuestbookEntry, Comment, Vendor } from '../types';
 import { api } from '../services/api';
 import { socketService } from '../services/socketService';
 import { isMobileDevice } from '../utils/deviceDetection';
 import { ShareModal } from './ShareModal';
+import { VendorAdCard } from './VendorAdCard';
 
-// Globals for Face API
 declare global {
     interface Window {
         faceapi: any;
@@ -197,6 +197,9 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
   const [isBulkDeleteMode, setIsBulkDeleteMode] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // NEW: Vendors State for Ads
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+
   // Helper: Check if user can manage (delete/select) a specific item
   const canManageItem = (item: MediaItem) => {
       if (!currentUser) return false;
@@ -271,6 +274,21 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
          setIsPinLocked(false);
      }
   }, [isOwner, currentUser]);
+
+  // NEW: Fetch Vendors matching city
+  useEffect(() => {
+    const fetchLocalVendors = async () => {
+        if (event.city) {
+            try {
+                const fetchedVendors = await api.fetchVendors(event.city);
+                setVendors(fetchedVendors);
+            } catch (e) { 
+                console.error("Failed to fetch vendors", e); 
+            }
+        }
+    };
+    fetchLocalVendors();
+  }, [event.city]);
 
   useEffect(() => {
      const loadModels = async () => {
@@ -533,6 +551,95 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
       } catch (error) {} finally { setIsDeleting(false); }
   };
 
+  // HELPER: Render Grid with Ads
+  const renderGrid = () => {
+    const gridItems = [];
+    let adIndex = 0;
+    
+    for (let i = 0; i < displayMedia.length; i++) {
+        const item = displayMedia[i];
+        
+        // Inject Ad every 8 items if we have vendors and not in bulk mode
+        if (vendors.length > 0 && !isBulkDeleteMode && i > 0 && i % 8 === 0) {
+            const vendor = vendors[adIndex % vendors.length];
+            gridItems.push(
+                <VendorAdCard key={`ad-${i}`} vendor={vendor} />
+            );
+            adIndex++;
+        }
+
+        gridItems.push(
+          <div key={item.id} className="break-inside-avoid relative group rounded-2xl overflow-hidden bg-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer mb-4" onClick={() => !isBulkDeleteMode && openLightbox(i)}>
+            
+            {/* Bulk Select Overlay - Only if mode active AND user can manage this specific item */}
+            {isBulkDeleteMode && canManageItem(item) && (
+              <div className="absolute top-0 left-0 right-0 bottom-0 z-20 bg-black/10 flex items-start justify-end p-3">
+                <button onClick={(e) => { e.stopPropagation(); toggleMediaSelection(item.id); }} className={`w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm ${selectedMedia.has(item.id) ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400'}`}>
+                  {selectedMedia.has(item.id) ? <CheckSquare size={14} /> : <Square size={14} />}
+                </button>
+              </div>
+            )}
+
+            {item.type === 'video' ? (
+                <VideoGridItem item={item} onClick={() => !isBulkDeleteMode && openLightbox(i)} />
+            ) : (
+              // Updated Image Grid Item with Fallback
+              <div className="w-full h-auto bg-slate-200 relative min-h-[100px]">
+                  <img 
+                      src={item.previewUrl || item.url} 
+                      alt={item.caption} 
+                      className="w-full h-full object-cover" 
+                      loading="lazy" 
+                      onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.parentElement?.querySelector('.error-placeholder')?.classList.remove('hidden');
+                      }}
+                  />
+                  <div className="error-placeholder hidden absolute inset-0 flex items-center justify-center text-slate-400 p-2 text-center bg-slate-100">
+                      <span className="text-[10px] font-bold">{item.caption || 'Image unavailable'}</span>
+                  </div>
+              </div>
+            )}
+            {item.isWatermarked && item.watermarkText && (
+              <div className="absolute bottom-2 right-2 pointer-events-none">
+                <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest drop-shadow-md px-1.5 py-0.5 rounded bg-black/30 backdrop-blur-sm">{item.watermarkText}</p>
+              </div>
+            )}
+            
+            {/* UPDATED: Privacy Lock Icon */}
+            {item.privacy === 'private' && (
+                <div className="absolute top-2 right-2 bg-black/60 text-white p-1 rounded-full shadow-sm backdrop-blur-sm z-10">
+                    <Lock size={12} />
+                </div>
+            )}
+
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 pointer-events-none">
+              <p className="text-white text-sm font-medium truncate">{item.caption}</p>
+              <div className="flex justify-between items-end mt-0.5">
+                  <p className="text-white/60 text-xs">by {item.uploaderName}</p>
+                  {item.comments && item.comments.length > 0 && (
+                      <div className="flex items-center gap-1 text-white/80 text-xs">
+                          <MessageSquare size={12} /> {item.comments.length}
+                      </div>
+                  )}
+              </div>
+            </div>
+            {!isBulkDeleteMode && (
+                <button onClick={(e) => { e.stopPropagation(); onLike(item); }} className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-md rounded-full p-2 text-slate-400 shadow-lg hover:text-red-500 hover:scale-110 transition-all flex items-center gap-1 pointer-events-auto z-10">
+                    <Heart size={16} className={item.likes ? 'fill-red-500 text-red-500' : ''} />
+                    {item.likes ? <span className="text-xs font-bold text-red-500">{item.likes}</span> : null}
+                </button>
+            )}
+            {/* Star Cover Icon - Host Only */}
+            {(isOwner || currentUser?.role === UserRole.ADMIN) && item.type === 'image' && !isBulkDeleteMode && (
+              <button onClick={(e) => { e.stopPropagation(); onSetCover(item); }} className="absolute top-3 left-3 bg-black/40 backdrop-blur-md rounded-full p-1.5 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-indigo-600 pointer-events-auto z-10"><Star size={14} /></button>
+            )}
+          </div>
+        );
+    }
+    return gridItems;
+  };
+
   if (isPinLocked) {
       return (
           <div className="min-h-[60vh] flex items-center justify-center px-4">
@@ -599,9 +706,15 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           
           <div className="flex-1 text-center md:text-left w-full">
             <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-2">{event.title}</h1>
-            <p className="text-slate-500 flex items-center justify-center md:justify-start mb-6 font-medium">
+            <p className="text-slate-500 flex items-center justify-center md:justify-start mb-2 font-medium">
               <Calendar size={18} className="mr-2 text-indigo-500" /> {event.date || t('dateTBD')}
             </p>
+            {/* NEW: City Display */}
+            {event.city && (
+               <p className="text-slate-500 flex items-center justify-center md:justify-start mb-6 font-medium">
+                  <MapPin size={18} className="mr-2 text-red-500" /> {event.city}
+               </p>
+            )}
             <div className="text-slate-700 bg-slate-50 p-5 rounded-2xl border border-slate-200 w-full text-left shadow-sm relative">
               <p className="italic">{event.description}</p>
             </div>
@@ -612,11 +725,9 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
       <div className="flex justify-center mb-8">
           <div className="bg-white p-1.5 rounded-xl shadow-sm border border-slate-200 flex gap-2">
               <button onClick={() => setActiveTab('gallery')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'gallery' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}>
-                  <LayoutGrid size={18} /> {t('gallery')}
-              </button>
+                  <LayoutGrid size={18} /> {t('gallery')}</button>
               <button onClick={() => setActiveTab('guestbook')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'guestbook' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}>
-                  <BookOpen size={18} /> {t('guestbook')}
-              </button>
+                  <BookOpen size={18} /> {t('guestbook')}</button>
           </div>
       </div>
 
@@ -697,7 +808,8 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
                        <label className="cursor-pointer bg-indigo-600 text-white px-6 py-3 rounded-full font-bold text-sm hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-lg shadow-indigo-200">
                            <Camera size={18} />
                            {t('uploadSelfie')}
-                           <input type="file" accept="image/*" className="hidden" onChange={handleFindMeUpload} />
+                           {/* FIX: Force Selfie Camera */}
+                           <input type="file" accept="image/*" capture="user" className="hidden" onChange={handleFindMeUpload} />
                        </label>
                        {findMeImage && (
                            <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-indigo-500 shadow-sm"><img src={findMeImage} className="w-full h-full object-cover" alt="Selfie" /></div>
@@ -712,7 +824,7 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           {/* "Add Memory" Card - Visual Distinct */}
           {/* Shows for Owner OR Admin OR Regular User (if not in bulk mode/search) */}
           {(isOwner || currentUser?.role === UserRole.ADMIN || currentUser) && !isBulkDeleteMode && !searchQuery && (
-              <div onClick={() => onUpload('upload')} className="break-inside-avoid relative group rounded-2xl overflow-hidden bg-gradient-to-br from-indigo-50 to-white border-2 border-dashed border-indigo-200 shadow-sm hover:shadow-md hover:border-indigo-400 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[250px] animate-in fade-in slide-in-from-bottom-4">
+              <div onClick={() => onUpload('upload')} className="break-inside-avoid relative group rounded-2xl overflow-hidden bg-gradient-to-br from-indigo-50 to-white border-2 border-dashed border-indigo-200 shadow-sm hover:shadow-md hover:border-indigo-400 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[250px] animate-in fade-in slide-in-from-bottom-4 mb-4">
                   <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4 shadow-inner group-hover:scale-110 transition-transform duration-300">
                       <Plus size={32} strokeWidth={3} />
                   </div>
@@ -721,74 +833,8 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
               </div>
           )}
 
-          {displayMedia.map((item, index) => (
-            <div key={item.id} className="break-inside-avoid relative group rounded-2xl overflow-hidden bg-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => !isBulkDeleteMode && openLightbox(index)}>
-              
-              {/* Bulk Select Overlay - Only if mode active AND user can manage this specific item */}
-              {isBulkDeleteMode && canManageItem(item) && (
-                <div className="absolute top-0 left-0 right-0 bottom-0 z-20 bg-black/10 flex items-start justify-end p-3">
-                  <button onClick={(e) => { e.stopPropagation(); toggleMediaSelection(item.id); }} className={`w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm ${selectedMedia.has(item.id) ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400'}`}>
-                    {selectedMedia.has(item.id) ? <CheckSquare size={14} /> : <Square size={14} />}
-                  </button>
-                </div>
-              )}
-
-              {item.type === 'video' ? (
-                  <VideoGridItem item={item} onClick={() => !isBulkDeleteMode && openLightbox(index)} />
-              ) : (
-                // Updated Image Grid Item with Fallback
-                <div className="w-full h-auto bg-slate-200 relative min-h-[100px]">
-                    <img 
-                        src={item.previewUrl || item.url} 
-                        alt={item.caption} 
-                        className="w-full h-full object-cover" 
-                        loading="lazy" 
-                        onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            e.currentTarget.parentElement?.querySelector('.error-placeholder')?.classList.remove('hidden');
-                        }}
-                    />
-                    <div className="error-placeholder hidden absolute inset-0 flex items-center justify-center text-slate-400 p-2 text-center bg-slate-100">
-                        <span className="text-[10px] font-bold">{item.caption || 'Image unavailable'}</span>
-                    </div>
-                </div>
-              )}
-              {item.isWatermarked && item.watermarkText && (
-                <div className="absolute bottom-2 right-2 pointer-events-none">
-                  <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest drop-shadow-md px-1.5 py-0.5 rounded bg-black/30 backdrop-blur-sm">{item.watermarkText}</p>
-                </div>
-              )}
-              
-              {/* UPDATED: Privacy Lock Icon */}
-              {item.privacy === 'private' && (
-                  <div className="absolute top-2 right-2 bg-black/60 text-white p-1 rounded-full shadow-sm backdrop-blur-sm z-10">
-                      <Lock size={12} />
-                  </div>
-              )}
-
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 pointer-events-none">
-                <p className="text-white text-sm font-medium truncate">{item.caption}</p>
-                <div className="flex justify-between items-end mt-0.5">
-                    <p className="text-white/60 text-xs">by {item.uploaderName}</p>
-                    {item.comments && item.comments.length > 0 && (
-                        <div className="flex items-center gap-1 text-white/80 text-xs">
-                            <MessageSquare size={12} /> {item.comments.length}
-                        </div>
-                    )}
-                </div>
-              </div>
-              {!isBulkDeleteMode && (
-                  <button onClick={(e) => { e.stopPropagation(); onLike(item); }} className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-md rounded-full p-2 text-slate-400 shadow-lg hover:text-red-500 hover:scale-110 transition-all flex items-center gap-1 pointer-events-auto z-10">
-                      <Heart size={16} className={item.likes ? 'fill-red-500 text-red-500' : ''} />
-                      {item.likes ? <span className="text-xs font-bold text-red-500">{item.likes}</span> : null}
-                  </button>
-              )}
-              {/* Star Cover Icon - Host Only */}
-              {(isOwner || currentUser?.role === UserRole.ADMIN) && item.type === 'image' && !isBulkDeleteMode && (
-                <button onClick={(e) => { e.stopPropagation(); onSetCover(item); }} className="absolute top-3 left-3 bg-black/40 backdrop-blur-md rounded-full p-1.5 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-indigo-600 pointer-events-auto z-10"><Star size={14} /></button>
-              )}
-            </div>
-          ))}
+          {/* UPDATED: Render Grid with Injected Ads */}
+          {renderGrid()}
         </div>
 
         {/* Refined Empty State Logic */}

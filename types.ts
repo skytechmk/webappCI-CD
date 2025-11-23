@@ -51,7 +51,6 @@ export const TIER_CONFIG: Record<TierLevel, TierConfig> = {
   }
 };
 
-// Admin users get unlimited access regardless of tier
 export const getTierConfigForUser = (user: User | null): TierConfig => {
   if (user?.role === UserRole.ADMIN) {
     return {
@@ -65,7 +64,6 @@ export const getTierConfigForUser = (user: User | null): TierConfig => {
   return TIER_CONFIG[user?.tier || TierLevel.FREE];
 };
 
-// ADDED: Helper to get config based on simple TierLevel enum (for guests)
 export const getTierConfig = (tier: TierLevel): TierConfig => {
     return TIER_CONFIG[tier];
 };
@@ -81,16 +79,15 @@ export interface User {
   storageUsedMb: number;
   storageLimitMb: number;
   joinedDate: string;
-  // Studio Specifics
   studioName?: string;
   website?: string;
   watermarkText?: string;
-  logoUrl?: string; // Base64 string of the logo
-  watermarkOpacity?: number; // 0.1 to 1.0
-  watermarkSize?: number; // 5 to 50 (percentage of image width)
+  logoUrl?: string; 
+  watermarkOpacity?: number; 
+  watermarkSize?: number; 
   watermarkPosition?: WatermarkPosition;
-  watermarkOffsetX?: number; // 0 to 50 (%)
-  watermarkOffsetY?: number; // 0 to 50 (%)
+  watermarkOffsetX?: number; 
+  watermarkOffsetY?: number; 
 }
 
 export interface Comment {
@@ -107,16 +104,16 @@ export interface MediaItem {
   eventId: string;
   type: 'image' | 'video';
   url: string;
-  previewUrl?: string; // For videos (transcoded 720p or thumbnail)
-  isProcessing?: boolean; // If video is currently transcoding
-  caption?: string; // AI Generated
+  previewUrl?: string; 
+  isProcessing?: boolean; 
+  caption?: string; 
   uploadedAt: string;
   uploaderName: string;
-  uploaderId?: string; // Added: To track ownership for guests/users
+  uploaderId?: string; 
   isWatermarked?: boolean;
   watermarkText?: string;
-  likes?: number; // Enhanced Feature: Social Reaction
-  comments?: Comment[]; // Enhanced Feature: Comments
+  likes?: number; 
+  comments?: Comment[]; 
   privacy: 'public' | 'private'; 
 }
 
@@ -133,20 +130,35 @@ export interface Event {
   title: string;
   description: string;
   date: string;
+  city?: string; // NEW: Location for ad targeting
   hostId: string;
-  code: string; // For joining
+  code: string; 
   media: MediaItem[];
   guestbook?: GuestbookEntry[];
   coverImage?: string;
   coverMediaType?: 'image' | 'video';
-  expiresAt: string | null; // ISO String, null = unlimited
-  pin?: string; // Optional security PIN
-  hasPin?: boolean; // NEW: Flag to indicate pin existence without revealing it
-  // Analytics
+  expiresAt: string | null; 
+  pin?: string; 
+  hasPin?: boolean; 
   views?: number;
   downloads?: number;
-  // NEW: Host Tier for guest capability checks
   hostTier?: TierLevel;
+}
+
+// NEW: Vendor Interface for Ad System
+export interface Vendor {
+  id: string;
+  ownerId: string; // Link to User
+  businessName: string;
+  category: 'photographer' | 'videographer' | 'venue' | 'planner' | 'dj' | 'other';
+  city: string;
+  description: string;
+  contactEmail: string;
+  contactPhone?: string;
+  website?: string;
+  instagram?: string;
+  coverImage?: string; // URL for the ad card background
+  isVerified: boolean;
 }
 
 export interface PricingTier {

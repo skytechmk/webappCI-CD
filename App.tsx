@@ -6,7 +6,7 @@ import { jwtDecode } from 'jwt-decode';
 import { User, Event, MediaItem, UserRole, TierLevel, Language, TranslateFn, TIER_CONFIG, getTierConfigForUser, getTierConfig } from './types';
 import { api } from './services/api';
 import { TRANSLATIONS } from './constants';
-import { CameraCapture } from './components/CameraCapture';
+// CameraCapture import removed - switching to native camera
 import { AdminDashboard } from './components/AdminDashboard';
 import { Navigation } from './components/Navigation';
 import { LandingPage } from './components/LandingPage';
@@ -43,9 +43,6 @@ const sanitizeInput = (input: string): string => {
   return input.replace(/[<>]/g, '').trim();
 };
 
-// SECURITY FIX: Removed insecure client-side "encryption".
-// Using localStorage directly is better than a false sense of security.
-// For true security, switch to HttpOnly cookies in a future update.
 const safeSetItem = (key: string, value: string) => {
   try {
     localStorage.setItem(key, value);
@@ -83,7 +80,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [currentEventId, setCurrentEventId] = useState<string | null>(null);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  // isCameraOpen state removed as we use native camera now
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [language, setLanguage] = useState<Language>('en');
@@ -93,6 +90,7 @@ export default function App() {
   const [guestName, setGuestName] = useState(() => safeGetItem('snapify_guest_name') || '');
   const [showGuestLogin, setShowGuestLogin] = useState(false);
   const [pendingAction, setPendingAction] = useState<'upload' | 'camera' | null>(null);
+  const [lastUsedInput, setLastUsedInput] = useState<'upload' | 'camera'>('upload'); // To handle retakes correctly
 
   // Modals State
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -106,17 +104,51 @@ export default function App() {
   // Preview & Upload State
   const [previewMedia, setPreviewMedia] = useState<{ type: 'image'|'video', src: string, file?: File } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0); // NEW STATE
+  const [uploadProgress, setUploadProgress] = useState(0); 
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null); // NEW: Dedicated ref for camera input
 
   // -- FIX: Auto-Persistence --
-  // This ensures that ANY change to currentUser (via API or Socket) is immediately saved.
   useEffect(() => {
     if (currentUser) {
         localStorage.setItem('snapify_user_obj', JSON.stringify(currentUser));
     }
   }, [currentUser]);
+
+  // -- NEW: Listen for Admin Forced Reloads --
+  useEffect(() => {
+      socketService.connect();
+
+      const handleForceReload = async () => {
+          console.log("Received force reload signal from admin.");
+          
+          // 1. Unregister Service Workers
+          if ('serviceWorker' in navigator) {
+              const registrations = await navigator.serviceWorker.getRegistrations();
+              for (const registration of registrations) {
+                  await registration.unregister();
+              }
+          }
+          
+          // 2. Clear specific caches if possible (optional, reload usually handles it if SW is gone)
+          if ('caches' in window) {
+              const cacheNames = await caches.keys();
+              cacheNames.forEach(cacheName => {
+                  caches.delete(cacheName);
+              });
+          }
+
+          // 3. Hard Reload
+          window.location.reload();
+      };
+
+      socketService.on('force_client_reload', handleForceReload);
+
+      return () => {
+          socketService.off('force_client_reload', handleForceReload);
+      };
+  }, []);
 
   // -- Real-time User Updates --
   useEffect(() => {
@@ -124,17 +156,12 @@ export default function App() {
         socketService.connect();
         
         const handleUserUpdate = (updatedUser: User) => {
-            // 1. Update Current User State
             if (updatedUser.id === currentUser.id) {
                 setCurrentUser(prev => {
                     if (!prev) return null;
-                    // Merge with previous state to ensure we don't lose fields 
-                    // if the update payload is partial
                     return { ...prev, ...updatedUser };
                 });
             }
-            
-            // 2. Update Admin List State
             setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
         };
 
@@ -154,7 +181,6 @@ export default function App() {
           
           let currentUserFromStorage: User | null = null;
 
-          // Restore User Session
           if (token && storedUserId) {
               try {
                   const savedUserStr = localStorage.getItem('snapify_user_obj');
@@ -162,8 +188,6 @@ export default function App() {
                       currentUserFromStorage = JSON.parse(savedUserStr);
                       setCurrentUser(currentUserFromStorage);
                   }
-
-                  // Fetch data relative to user
                   const eventsData = await api.fetchEvents();
                   setEvents(eventsData);
                   
@@ -173,12 +197,11 @@ export default function App() {
                   }
               } catch (e) {
                   console.warn("Session expired or invalid", e);
-                  handleLogout(); // Clean cleanup
+                  handleLogout();
                   currentUserFromStorage = null;
               }
           }
 
-          // Check URL for Event
           const params = new URLSearchParams(window.location.search);
           const sharedEventId = params.get('event');
           
@@ -186,27 +209,21 @@ export default function App() {
                try {
                    const sharedEvent = await api.fetchEventById(sharedEventId);
                    if (sharedEvent) {
-                       // Add shared event to state if not present
                        setEvents(prev => {
                            if (!prev.find(e => e.id === sharedEventId)) return [...prev, sharedEvent];
                            return prev;
                        });
-                       
-                       // CRITICAL: Prioritize Event View if URL param exists
                        setCurrentEventId(sharedEventId);
                        setView('event'); 
-                       
                        incrementEventViews(sharedEventId, [sharedEvent]);
                    }
                } catch (error) {
                    console.error("Failed to fetch shared event", error);
-                   // If event fetch fails, fall back to dashboard logic
                    if (currentUserFromStorage) {
                        setView(currentUserFromStorage.role === UserRole.ADMIN ? 'admin' : 'dashboard');
                    }
                }
           } else {
-              // No shared event in URL -> Route based on auth status
               if (currentUserFromStorage) {
                   setView(currentUserFromStorage.role === UserRole.ADMIN ? 'admin' : 'dashboard');
               } else {
@@ -245,9 +262,7 @@ export default function App() {
 
   const handleGoogleResponse = async (response: any) => {
       try {
-          // SECURITY: Send the raw credential to backend for verification
           const credential = response.credential;
-          
           try {
               const res = await api.googleLogin(credential);
               finalizeLogin(res.user, res.token);
@@ -267,26 +282,20 @@ export default function App() {
       localStorage.setItem('snapify_user_id', user.id);
       localStorage.setItem('snapify_user_obj', JSON.stringify(user));
       
-      // Refresh events with the new auth token to ensure we get user-specific data
       try {
           const eventsData = await api.fetchEvents();
           setEvents(eventsData);
 
-          // Check URL for event parameter first (highest priority)
           const params = new URLSearchParams(window.location.search);
           const urlEventId = params.get('event');
           
-          // Determine target view
           if (urlEventId) {
-              // If there's an event in URL, ensure it's loaded and redirect
-              // We check if the event is already in the fetched list
               const targetEvent = eventsData.find(e => e.id === urlEventId);
               
               if (targetEvent) {
                  setCurrentEventId(urlEventId);
                  setView('event');
               } else {
-                 // If not in list (maybe public event not owned by user), try fetching it specifically
                  try {
                      const sharedEvent = await api.fetchEventById(urlEventId);
                      setEvents(prev => [...prev, sharedEvent]);
@@ -294,18 +303,14 @@ export default function App() {
                      setView('event');
                  } catch(err) {
                      console.error("Could not load URL event after login", err);
-                     // Fallback to dashboard
                      setView('dashboard');
                  }
               }
           } else if (currentEventId) {
-              // If we have a current event in state (preserved from before login), stay on that event
-              // Re-verify it exists in the new authenticated context
                const targetEvent = eventsData.find(e => e.id === currentEventId);
                if(targetEvent) {
                    setView('event');
                } else {
-                   // Try fetching specifically again
                    try {
                        const sharedEvent = await api.fetchEventById(currentEventId);
                        setEvents(prev => {
@@ -325,7 +330,6 @@ export default function App() {
           }
       } catch (error) {
           console.error("Error during finalizeLogin", error);
-          // Fallback
           setView('dashboard');
       }
   };
@@ -359,32 +363,25 @@ export default function App() {
     
     try {
         const { email, password, name, isPhotographer, studioName } = data;
-        
-        // Input validation
         if (!email || !password) {
             setAuthError(t('authErrorRequired'));
             return;
         }
-        
         if (!validateEmail(email)) {
             setAuthError(t('authErrorInvalidEmail'));
             return;
         }
-        
         if (password.length < 6) {
             setAuthError(t('authErrorPasswordLength'));
             return;
         }
-        
         if (isSignUp) {
             if (!name || name.trim().length < 2) {
                 setAuthError(t('authErrorNameRequired'));
                 return;
             }
-            
             const sanitizedName = sanitizeInput(name);
             const sanitizedStudioName = studioName ? sanitizeInput(studioName) : undefined;
-            
             const newUser: User = {
                 id: `user-${Date.now()}`,
                 name: sanitizedName,
@@ -396,7 +393,6 @@ export default function App() {
                 joinedDate: new Date().toISOString().split('T')[0],
                 studioName: isPhotographer ? sanitizedStudioName : undefined
             };
-            
             const res = await api.createUser(newUser);
             await finalizeLogin(res.user, res.token);
         } else {
@@ -416,27 +412,21 @@ export default function App() {
     safeSetItem('snapify_guest_name', name);
     setShowGuestLogin(false);
     
-    // After guest login, ensure we stay on the event view if we have an ID
-    if (currentEventId) {
-        setView('event');
-    }
+    if (currentEventId) setView('event');
 
-    if (pendingAction === 'camera') setIsCameraOpen(true);
+    // UPDATED: Handle camera vs upload pending actions
+    if (pendingAction === 'camera') cameraInputRef.current?.click();
     else if (pendingAction === 'upload') fileInputRef.current?.click();
     setPendingAction(null);
   };
 
-  // Redirect to Landing Page for login, but PRESERVE currentEventId in state
-  // This ensures finalizeLogin redirects back to the event after auth
   const handleSignInRequest = () => {
       setShowGuestLogin(false);
-      // We keep currentEventId set so finalizeLogin knows where to return
       setView('landing');
   };
 
   const handleCreateEvent = async (data: any) => {
     if (!currentUser) return;
-    // FIX: Destructure 'pin' correctly from the data object
     const { title, date, theme, description, pin, adminOptions } = data;
     
     let expiresAt: string | null = null;
@@ -471,7 +461,7 @@ export default function App() {
       code: Math.random().toString(36).substring(2, 8).toUpperCase(),
       media: [],
       expiresAt,
-      pin: pin, // FIX: Assign the pin to the new event
+      pin: pin,
       views: 0,
       downloads: 0
     };
@@ -547,8 +537,10 @@ export default function App() {
   };
 
   const initiateMediaAction = (action: 'upload' | 'camera') => {
+    setLastUsedInput(action); // Keep track for retakes
     if (currentUser || guestName) {
-      if (action === 'camera') setIsCameraOpen(true);
+      // UPDATED: If camera action, trigger the camera-specific input
+      if (action === 'camera') cameraInputRef.current?.click();
       else fileInputRef.current?.click();
     } else {
       setPendingAction(action);
@@ -564,36 +556,25 @@ export default function App() {
     setPreviewMedia({ type, src: url, file });
   };
 
-  const handleCameraCapture = (imageSrc: string) => {
-    if (!activeEvent) return;
-    setIsCameraOpen(false);
-    setPreviewMedia({ type: 'image', src: imageSrc });
-  };
+  // CameraCapture related handler removed as component is removed
 
   const confirmUpload = async (userCaption: string, userPrivacy: 'public' | 'private') => {
     if (!activeEvent || !previewMedia) return;
     setIsUploading(true);
-    setUploadProgress(0); // Reset progress
+    setUploadProgress(0); 
 
     try {
         const { type, src, file } = previewMedia;
         const uploader = currentUser ? (currentUser.studioName || currentUser.name) : guestName || "Guest";
         const fileSizeMb = file ? file.size / (1024 * 1024) : (src.length * (3/4)) / (1024*1024);
         
-        // SECURITY FIX: Use activeEvent.hostTier to determine capabilities
-        // The event capabilities are determined by the HOST's tier, not the uploader's tier.
-        
         if (type === 'video') {
-             // Determine the effective tier configuration
              let config;
              if (currentUser && activeEvent.hostId === currentUser.id) {
-                 // I am the host
                  config = getTierConfigForUser(currentUser);
              } else if (activeEvent.hostTier) {
-                 // I am a guest, use the host's tier from the event data
                  config = getTierConfig(activeEvent.hostTier);
              } else {
-                 // Fallback (should rarely happen if backend returns hostTier)
                  config = TIER_CONFIG[TierLevel.FREE];
              }
 
@@ -637,7 +618,6 @@ export default function App() {
             caption: finalCaption,
             uploadedAt: new Date().toISOString(),
             uploaderName: uploader,
-            // NEW: Include uploaderId for guest tracking
             uploaderId: currentUser ? currentUser.id : `guest-${guestName}-${Date.now()}`,
             isWatermarked: shouldWatermark,
             watermarkText: currentUser?.studioName,
@@ -645,7 +625,6 @@ export default function App() {
         };
 
         if (uploadFile) {
-            // Use new uploadMedia with progress callback
             await api.uploadMedia(uploadFile, metadata, activeEvent.id, (percent) => {
                 setUploadProgress(percent);
             });
@@ -654,7 +633,9 @@ export default function App() {
             updateUserStorage(currentUser.id, fileSizeMb);
         }
         setPreviewMedia(null);
+        // Clear BOTH inputs to ensure change event fires next time
         if (fileInputRef.current) fileInputRef.current.value = '';
+        if (cameraInputRef.current) cameraInputRef.current.value = '';
     } catch (e) {
         console.error("Upload failed", e);
         alert("Upload failed. Please try again.");
@@ -715,39 +696,31 @@ export default function App() {
   };
 
   const handleLogout = () => {
-      // 1. Reset state immediately
       setCurrentUser(null);
       setGuestName('');
       setView('landing');
       setCurrentEventId(null);
-      
-      // 2. Clear storage
       localStorage.removeItem('snapify_token');
       localStorage.removeItem('snapify_user_id');
       localStorage.removeItem('snapify_user_obj');
       safeRemoveItem('snapify_guest_name');
       clearDeviceFingerprint();
-      
-      // 3. Clean URL
-      // FIX: Force clear URL and push to history to ensure reload doesn't restore state
       if (typeof window !== 'undefined') {
           const url = new URL(window.location.href);
           url.search = ""; 
-          window.history.pushState({}, '', url.toString()); // Use pushState instead of replaceState to ensure clear history entry
-          window.location.href = '/'; // Force hard reload to clear memory
+          window.history.pushState({}, '', url.toString()); 
+          window.location.href = '/';
       }
   };
 
   const handleBack = () => {
       if (view === 'event') {
           setCurrentEventId(null);
-          // FIX: Clear the ?event=... param when going back to dashboard/landing
           const url = new URL(window.location.href);
           if (url.searchParams.has('event')) {
              url.searchParams.delete('event');
              window.history.replaceState({}, '', url.toString());
           }
-
           setView(currentUser ? (currentUser.role === UserRole.ADMIN ? 'admin' : 'dashboard') : 'landing');
       } else if (view === 'dashboard' || view === 'admin') {
           handleLogout();
@@ -775,24 +748,12 @@ export default function App() {
       }
   };
 
-  // Security: Enhanced error handling for critical operations
-  const handleCriticalError = (error: any, operation: string) => {
-    console.error(`Critical error in ${operation}:`, error);
-    // In production, this could send to error reporting service
-    alert(`An unexpected error occurred during ${operation}. Please try again.`);
-  };
-
   return (
-    // APP SHELL LAYOUT - ADAPTIVE & STATIC HEADER
-    // h-[100dvh] ensures app fills the visible viewport perfectly on mobile browsers
-    // No root padding allows Landing Page to bleed to edges
     <div className="h-[100dvh] w-full flex flex-col bg-slate-50">
       <OfflineBanner t={t} />
       <ShareTargetHandler onShareReceive={handleIncomingShare} />
       <ReloadPrompt />
 
-      {/* STATIC HEADER AREA */}
-      {/* Moved Navigation out of scroll view to ensure it remains static at the top */}
       {view !== 'landing' && (
         <div className="flex-shrink-0 z-50 w-full bg-slate-50/95 backdrop-blur-md border-b border-slate-200">
              <Navigation 
@@ -817,12 +778,8 @@ export default function App() {
         </div>
       )}
       
-      {/* SCROLLABLE CONTENT AREA */}
-      {/* Contains all the main views and scrolls independently */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth w-full relative no-scrollbar">
-          
           {view === 'landing' ? (
-            // Landing page can handle its own padding if needed, or bleed to edges
             <div className="min-h-full w-full">
               <LandingPage 
                 onGoogleLogin={() => { if (window.google) window.google.accounts.id.prompt(); }}
@@ -838,7 +795,6 @@ export default function App() {
               {showContactModal && <ContactModal onClose={() => setShowContactModal(false)} t={t} />}
             </div>
           ) : (
-             // AUTHENTICATED / EVENT VIEWS
              <div className="flex flex-col min-h-full">
                  <div className="flex-1 pb-32"> 
                     {view === 'admin' && currentUser?.role === UserRole.ADMIN && (
@@ -871,7 +827,7 @@ export default function App() {
 
                     {view === 'event' && activeEvent && (
                         <EventGallery 
-                          key={activeEvent.id} // Force remount on ID change to reset PIN state
+                          key={activeEvent.id} 
                           event={activeEvent}
                           currentUser={currentUser}
                           hostUser={hostUser}
@@ -893,7 +849,6 @@ export default function App() {
              </div>
           )}
           
-          {/* Live Slideshow - Full Screen Overlay */}
           {view === 'live' && activeEvent && (
                 <LiveSlideshow 
                   event={activeEvent}
@@ -905,15 +860,26 @@ export default function App() {
           )}
       </div>
 
-      {/* FLOATING ELEMENTS & MODALS (Outside scroll view to stay on top) */}
       {view !== 'landing' && <PWAInstallPrompt t={t} />}
       
-      {/* MODIFIED: Update file input accept attribute to be more inclusive for mobile */}
+      {/* INPUTS: One for general upload, one for camera snap */}
       <input 
         type="file" 
         ref={fileInputRef} 
         className="hidden" 
         accept="image/*,video/*" 
+        onChange={handleFileUpload} 
+      />
+
+      {/* Camera Specific Input: uses capture='environment' to force native camera */}
+      {/* FIX: RESTRICT TO IMAGE TO FORCE CAMERA ON iOS */}
+      <input 
+        key="camera-input-v2" // Force re-render
+        type="file" 
+        ref={cameraInputRef} 
+        className="hidden" 
+        accept="image/*" // STRICTLY IMAGE
+        capture="environment" // REAR CAMERA
         onChange={handleFileUpload} 
       />
       
@@ -924,17 +890,25 @@ export default function App() {
             onConfirm={confirmUpload}
             onRetake={() => {
                 setPreviewMedia(null);
-                initiateMediaAction(previewMedia.type === 'video' && !previewMedia.file ? 'camera' : 'upload');
+                // Use state to determine which input to re-trigger
+                if (lastUsedInput === 'camera') cameraInputRef.current?.click();
+                else fileInputRef.current?.click();
             }}
             onCancel={() => setPreviewMedia(null)}
             isUploading={isUploading}
-            uploadProgress={uploadProgress} // Pass progress
+            uploadProgress={uploadProgress}
             isRegistered={!!currentUser}
             t={t}
+            file={previewMedia.file} // Pass file for EXIF
         />
       )}
+      
+      {/* UPDATED: High-visibility version debug badge */}
+      <div className="fixed bottom-4 left-4 z-[9999] pointer-events-none bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg opacity-80">
+        v2.1 NATIVE
+      </div>
 
-      {isCameraOpen && !previewMedia && <CameraCapture onClose={() => setIsCameraOpen(false)} onCapture={handleCameraCapture} t={t} />}
+      {/* CameraCapture component removed entirely */}
       {showContactModal && <ContactModal onClose={() => setShowContactModal(false)} t={t} />}
       {showGuestLogin && <GuestLoginModal onLogin={handleGuestLogin} onRegister={handleSignInRequest} onCancel={() => setShowGuestLogin(false)} t={t} />}
       {showCreateModal && currentUser && <CreateEventModal currentUser={currentUser} onClose={() => setShowCreateModal(false)} onCreate={handleCreateEvent} t={t} />}

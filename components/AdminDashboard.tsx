@@ -9,8 +9,11 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { User, UserRole, TierLevel, Event, TranslateFn, MediaItem } from '../types';
-import { Trash2, HardDrive, Zap, Calendar, Image as ImageIcon, X, Clock, Eye, Plus, Edit, Save, Camera, Briefcase, AlertTriangle, ZoomIn, Download, Lock, ArrowLeft, LogOut, Mail, Building, ShieldAlert, Users, LayoutGrid, Settings, Crown, Star } from 'lucide-react';
+import { Trash2, HardDrive, Zap, Calendar, Image as ImageIcon, X, Clock, Eye, Plus, Edit, Save, Camera, Briefcase, AlertTriangle, ZoomIn, Download, Lock, ArrowLeft, LogOut, Mail, Building, ShieldAlert, Users, LayoutGrid, Settings, Crown, Star, RefreshCw } from 'lucide-react';
 import { api } from '../services/api';
+// @ts-ignore
+import { useRegisterSW } from 'virtual:pwa-register/react';
+import { socketService } from '../services/socketService'; // Import socket service
 
 interface AdminDashboardProps {
   users: User[];
@@ -53,6 +56,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   t
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('users');
+  
+  // PWA Update Hook
+  const {
+    updateServiceWorker,
+  } = useRegisterSW();
   
   // Selection State
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -114,7 +122,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return events.filter(e => e.hostId === userId).length;
   };
 
-  // Helper to render tier badge in admin table
   const renderTierBadge = (tier: TierLevel) => {
     let badgeColor = 'bg-green-50 text-green-700 border-green-200';
     let icon = null;
@@ -140,9 +147,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </span>
     );
   };
-
-
-  // --- Actions ---
 
   const promptDeleteUser = (user: User) => {
     setDeleteConfirmation({
@@ -224,8 +228,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setDeleteConfirmation(null);
   };
 
-  // --- Edit Handlers ---
-
   const openEditModal = (evt: Event) => {
     setEditingEvent(evt);
     setEditTitle(evt.title);
@@ -297,7 +299,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setActiveTab('users');
   };
 
-  // --- Render Functions ---
+  // UPDATED: Enhanced Force Update Handler
+  const handleForceUpdate = async () => {
+      if (confirm("Force update app to latest version? This will unregister all service workers and reload the page.")) {
+          
+          // 1. Try the plugin method first
+          try {
+             await updateServiceWorker(true);
+          } catch (e) { console.error(e); }
+
+          // 2. Manually unregister all service workers (The nuclear option)
+          if ('serviceWorker' in navigator) {
+              const registrations = await navigator.serviceWorker.getRegistrations();
+              for (const registration of registrations) {
+                  await registration.unregister();
+              }
+          }
+
+          // 3. Force reload from server (ignoring cache)
+          window.location.reload();
+      }
+  };
+
+  // NEW: Handle Global Client Reload
+  const handleGlobalClientReload = () => {
+      if (confirm("⚠️ FORCE RELOAD ALL CLIENTS?\n\nThis will cause every user currently on the site to refresh their page immediately. Use this only after pushing a critical update.")) {
+          const token = localStorage.getItem('snapify_token');
+          if (token) {
+              // Emit event via socket service
+              if (socketService.socket) {
+                  socketService.socket.emit('admin_trigger_reload', token);
+                  alert("Signal sent. Clients should reload momentarily.");
+              } else {
+                  alert("Socket not connected.");
+              }
+          }
+      }
+  };
 
   const renderUserEvents = () => {
     if (!selectedUserForEvents) return null;
@@ -402,26 +440,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </p>
                   </div>
                   
-                  <div className="border border-red-200 rounded-2xl p-8 bg-red-50/50 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 p-4 opacity-10">
-                          <AlertTriangle size={120} className="text-red-500" />
-                      </div>
-                      <div className="relative z-10">
-                          <h4 className="text-xl font-bold text-red-900 mb-2 flex items-center gap-2">
-                              <Trash2 size={20}/> Danger Zone
-                          </h4>
-                          <p className="text-sm text-red-700 mb-6 max-w-xl leading-relaxed">
-                              Performs a hard reset of the entire SnapifY instance. This action will irreversibly delete 
-                              <strong> ALL</strong> users, events, photos, videos, and comments from the database and clear 
-                              all files from storage. 
-                          </p>
+                  <div className="space-y-6">
+                      {/* Force Update Card */}
+                      <div className="border border-indigo-200 rounded-2xl p-6 bg-indigo-50/50 flex items-center justify-between">
+                          <div>
+                              <h4 className="text-lg font-bold text-indigo-900 mb-1 flex items-center gap-2">
+                                  <RefreshCw size={18}/> App Updates
+                              </h4>
+                              <p className="text-sm text-indigo-700">
+                                  Force this browser to fetch the latest version of the application immediately.
+                              </p>
+                          </div>
                           <button 
-                              onClick={promptResetSystem}
-                              className="py-3 px-6 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-500/20 flex items-center gap-2"
+                              onClick={handleForceUpdate}
+                              className="py-2.5 px-5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-md flex items-center gap-2"
                           >
-                              <ShieldAlert size={18} />
-                              Reset System Database
+                              <RefreshCw size={16} />
+                              Force Reload App
                           </button>
+                      </div>
+
+                      {/* NEW: Global Client Force Reload Card */}
+                      <div className="border border-amber-200 rounded-2xl p-6 bg-amber-50/50 flex items-center justify-between">
+                          <div>
+                              <h4 className="text-lg font-bold text-amber-900 mb-1 flex items-center gap-2">
+                                  <Zap size={18}/> Global Client Refresh
+                              </h4>
+                              <p className="text-sm text-amber-700 max-w-md">
+                                  Send a signal to <strong>ALL connected users</strong> to unregister their service worker and reload the page. Use this after deploying a new version to ensure everyone gets it immediately.
+                              </p>
+                          </div>
+                          <button 
+                              onClick={handleGlobalClientReload}
+                              className="py-2.5 px-5 bg-amber-600 text-white font-bold rounded-xl hover:bg-amber-700 transition-all shadow-md flex items-center gap-2"
+                          >
+                              <RefreshCw size={16} />
+                              Reload All Clients
+                          </button>
+                      </div>
+
+                      {/* Reset Card */}
+                      <div className="border border-red-200 rounded-2xl p-8 bg-red-50/50 relative overflow-hidden">
+                          <div className="absolute top-0 right-0 p-4 opacity-10">
+                              <AlertTriangle size={120} className="text-red-500" />
+                          </div>
+                          <div className="relative z-10">
+                              <h4 className="text-xl font-bold text-red-900 mb-2 flex items-center gap-2">
+                                  <Trash2 size={20}/> Danger Zone
+                              </h4>
+                              <p className="text-sm text-red-700 mb-6 max-w-xl leading-relaxed">
+                                  Performs a hard reset of the entire SnapifY instance. This action will irreversibly delete 
+                                  <strong> ALL</strong> users, events, photos, videos, and comments from the database and clear 
+                                  all files from storage. 
+                              </p>
+                              <button 
+                                  onClick={promptResetSystem}
+                                  className="py-3 px-6 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-500/20 flex items-center gap-2"
+                              >
+                                  <ShieldAlert size={18} />
+                                  Reset System Database
+                              </button>
+                          </div>
                       </div>
                   </div>
               </div>
