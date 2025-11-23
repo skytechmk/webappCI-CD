@@ -9,7 +9,8 @@ interface MediaReviewModalProps {
   onRetake: () => void;
   onCancel: () => void;
   isUploading: boolean;
-  isRegistered: boolean; // New Prop to check auth status
+  uploadProgress?: number; // NEW PROP
+  isRegistered: boolean; 
   t: TranslateFn;
 }
 
@@ -20,6 +21,7 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
   onRetake,
   onCancel,
   isUploading,
+  uploadProgress = 0, // Default to 0
   isRegistered,
   t
 }) => {
@@ -127,12 +129,19 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
           <button 
             onClick={() => onConfirm(caption, privacy)}
             disabled={isUploading}
-            className="flex-[2] py-3.5 bg-indigo-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-colors disabled:opacity-70 shadow-lg shadow-indigo-900/30"
+            className="flex-[2] py-3.5 bg-indigo-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-colors disabled:opacity-70 shadow-lg shadow-indigo-900/30 relative overflow-hidden"
           >
             {isUploading ? (
                 <>
-                    <Loader2 size={18} className="animate-spin" />
-                    <span>Uploading...</span>
+                    {/* Progress Background */}
+                    <div 
+                        className="absolute inset-0 bg-indigo-500 transition-all duration-200 ease-out" 
+                        style={{ width: `${uploadProgress}%` }} 
+                    />
+                    <div className="relative z-10 flex items-center gap-2">
+                        <Loader2 size={18} className="animate-spin" />
+                        <span>{uploadProgress}%</span>
+                    </div>
                 </>
             ) : (
                 <>

@@ -16,10 +16,10 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
-import webpush from 'web-push'; // Added web-push
-import bcrypt from 'bcrypt'; // SECURITY: Add password hashing
-import { OAuth2Client } from 'google-auth-library'; // SECURITY: Add Google token verification
-import { GoogleGenAI } from "@google/genai"; // SECURITY: Move Gemini to backend
+import webpush from 'web-push'; 
+import bcrypt from 'bcrypt'; 
+import { OAuth2Client } from 'google-auth-library'; 
+import { GoogleGenAI } from "@google/genai"; 
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -28,30 +28,25 @@ const __dirname = path.dirname(__filename);
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 3001;
 
-// Security: Require environment variables in production
+// SECURITY FIX: Strict Environment Check
+// In production, we do NOT want to fallback to default insecure credentials.
 if (process.env.NODE_ENV === 'production') {
-    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD || !process.env.JWT_SECRET) {
-        console.error('FATAL: Missing required environment variables in production');
+    const requiredVars = ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'JWT_SECRET'];
+    const missing = requiredVars.filter(key => !process.env[key]);
+    if (missing.length > 0) {
+        console.error(`FATAL: Missing required environment variables in production: ${missing.join(', ')}`);
         process.exit(1);
     }
 }
 
-// SECURITY: Environment-dependent credentials
-const ADMIN_EMAIL = process.env.NODE_ENV === 'production' 
-    ? (process.env.VITE_ADMIN_EMAIL || 'admin@skytech.mk')
-    : (process.env.VITE_ADMIN_EMAIL || 'admin@skytech.mk');
-    
-const ADMIN_PASSWORD = process.env.NODE_ENV === 'production'
-    ? (process.env.ADMIN_PASSWORD || 'admin123')
-    : (process.env.ADMIN_PASSWORD || 'admin123');
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@skytech.mk';
+// Default password only for dev. In prod, the check above ensures this is set.
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'; 
 
-const JWT_SECRET = process.env.NODE_ENV === 'production'
-    ? (process.env.JWT_SECRET || 'change_this_in_production_secure_random_string')
-    : (process.env.JWT_SECRET || 'dev_jwt_secret_change_in_production');
-    
-const JWT_EXPIRY = '7d'; // SECURITY: Reduced from 365d to 7d for better security
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_in_production';
+const JWT_EXPIRY = '7d'; 
 
-// Domain Management - SECURITY: Restrict CORS in production
+// Domain Management
 const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production' 
     ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://snapify.skytech.mk'])
     : (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*');
@@ -142,8 +137,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// Initialize Tables
-db.serialize(() => {
+// Initialize Tables & Seed Admin
+db.serialize(async () => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         name TEXT,
@@ -163,15 +158,24 @@ db.serialize(() => {
         watermarkOffsetY REAL
     )`);
 
+    // SECURITY FIX: Seed Admin with HASHED password
     const adminId = 'admin-system-id';
     const adminName = 'System Admin';
     const joined = new Date().toISOString();
     
-    db.run(`INSERT OR IGNORE INTO users (id, name, email, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) 
-            VALUES (?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`, 
-            [adminId, adminName, ADMIN_EMAIL, joined], (err) => {
+    try {
+        const hashedAdminPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
+        
+        // Use INSERT OR REPLACE to update password if config changes
+        db.run(`INSERT OR REPLACE INTO users (id, name, email, password, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) 
+            VALUES (?, ?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`, 
+            [adminId, adminName, ADMIN_EMAIL, hashedAdminPassword, joined], (err) => {
                 if (err) console.error("Failed to seed admin user:", err);
+                else console.log("System Admin seeded/updated successfully.");
             });
+    } catch (err) {
+        console.error("Error hashing admin password:", err);
+    }
 
     db.run(`CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -249,30 +253,23 @@ db.serialize(() => {
     )`);
 });
 
-// SECURITY: Rate limiting for media uploads
+// Rate limiting for media uploads
 const uploadLimits = {
-    // Store upload counts per IP
     uploadCounts: new Map(),
-    
-    // Reset counters every hour
     resetInterval: setInterval(() => {
-        this.uploadCounts.clear();
+        uploadLimits.uploadCounts.clear();
     }, 60 * 60 * 1000),
-    
-    // Check if IP is rate limited
     isRateLimited: (ip) => {
-        const count = this.uploadCounts.get(ip) || 0;
+        const count = uploadLimits.uploadCounts.get(ip) || 0;
         return count >= 50; // Max 50 uploads per hour per IP
     },
-    
-    // Increment upload count for IP
     increment: (ip) => {
-        const count = this.uploadCounts.get(ip) || 0;
-        this.uploadCounts.set(ip, count + 1);
+        const count = uploadLimits.uploadCounts.get(ip) || 0;
+        uploadLimits.uploadCounts.set(ip, count + 1);
     }
 };
 
-// SECURITY: File upload middleware with DoS protection
+// File upload middleware
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => {
@@ -288,7 +285,6 @@ const upload = multer({
         files: 1 // Only one file per request
     },
     fileFilter: (req, file, cb) => {
-        // SECURITY: Validate file types
         const allowedMimes = [
             'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
             'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo'
@@ -298,7 +294,6 @@ const upload = multer({
             return cb(new Error('Invalid file type'), false);
         }
         
-        // SECURITY: Rate limiting check
         const clientIP = req.ip || req.connection.remoteAddress;
         if (uploadLimits.isRateLimited(clientIP)) {
             return cb(new Error('Upload limit exceeded. Please try again later.'), false);
@@ -379,35 +374,9 @@ app.post('/api/auth/login', async (req, res) => {
         return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // Admin login with environment variable check
-    if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && password === ADMIN_PASSWORD) {
-        const token = jwt.sign({ 
-            id: 'admin-system-id', 
-            role: 'ADMIN', 
-            email: ADMIN_EMAIL 
-        }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-        
-        const adminUser = {
-            id: 'admin-system-id',
-            name: 'System Admin',
-            email: ADMIN_EMAIL,
-            role: 'ADMIN',
-            tier: 'STUDIO',
-            storageUsedMb: 0,
-            storageLimitMb: Infinity,
-            joinedDate: new Date().toISOString()
-        };
-        
-        db.run(`INSERT OR IGNORE INTO users (id, name, email, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) 
-            VALUES (?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`, 
-            ['admin-system-id', 'System Admin', ADMIN_EMAIL, new Date().toISOString()], (err) => {
-                if (err) console.error("Self-repair admin seed failed:", err);
-            });
+    // SECURITY FIX: Removed hardcoded credential check.
+    // Admin is now retrieved from DB and password checked via bcrypt.
 
-        return res.json({ token, user: adminUser });
-    }
-
-    // Regular user login with password hashing
     db.get("SELECT * FROM users WHERE email = ?", [email], async (err, user) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!user) return res.status(401).json({ error: "Invalid credentials" });
@@ -613,7 +582,7 @@ app.post('/api/admin/reset', authenticateToken, async (req, res) => {
     }
 
     try {
-        db.serialize(() => {
+        db.serialize(async () => {
             db.run("DELETE FROM comments");
             db.run("DELETE FROM guestbook");
             db.run("DELETE FROM media");
@@ -623,9 +592,12 @@ app.post('/api/admin/reset', authenticateToken, async (req, res) => {
             const adminId = 'admin-system-id';
             const adminName = 'System Admin';
             const joined = new Date().toISOString();
-            db.run(`INSERT OR IGNORE INTO users (id, name, email, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) 
-                    VALUES (?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`, 
-                    [adminId, adminName, ADMIN_EMAIL, joined]);
+            // Re-seed admin with hashed password
+            const hashedAdminPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
+
+            db.run(`INSERT OR IGNORE INTO users (id, name, email, password, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName) 
+                    VALUES (?, ?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`, 
+                    [adminId, adminName, ADMIN_EMAIL, hashedAdminPassword, joined]);
         });
 
         fs.readdir(uploadDir, (err, files) => {
@@ -740,15 +712,25 @@ app.delete('/api/users/:id', authenticateToken, (req, res) => {
     });
 });
 
+// SECURITY FIX: Updated to fetch Host Tier
 app.get('/api/events', authenticateToken, (req, res) => {
     const callerId = req.user.id;
     const callerRole = req.user.role;
 
-    let query = "SELECT * FROM events WHERE hostId = ?";
+    let query = `
+        SELECT events.*, users.tier as hostTier 
+        FROM events 
+        JOIN users ON events.hostId = users.id 
+        WHERE events.hostId = ?
+    `;
     let params = [callerId];
 
     if (callerRole === 'ADMIN') {
-         query = "SELECT * FROM events";
+         query = `
+            SELECT events.*, users.tier as hostTier 
+            FROM events 
+            JOIN users ON events.hostId = users.id
+         `;
          params = [];
     }
 
@@ -769,7 +751,6 @@ app.get('/api/events', authenticateToken, (req, res) => {
                 let signedCover = evt.coverImage;
                 if (evt.coverImage && !evt.coverImage.startsWith('http')) signedCover = getPublicUrl(evt.coverImage);
 
-                // Admin or Host always sees PIN
                 return { ...evt, media: mediaWithComments, guestbook, coverImage: signedCover, hasPin: !!evt.pin };
             }));
             res.json(detailedEvents);
@@ -779,10 +760,38 @@ app.get('/api/events', authenticateToken, (req, res) => {
     });
 });
 
+// SECURITY FIX: Updated to fetch Host Tier
 app.get('/api/events/:id', (req, res) => {
-    db.get("SELECT * FROM events WHERE id = ?", [req.params.id], async (err, event) => {
+    const query = `
+        SELECT events.*, users.tier as hostTier 
+        FROM events 
+        JOIN users ON events.hostId = users.id 
+        WHERE events.id = ?
+    `;
+
+    db.get(query, [req.params.id], async (err, event) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!event) return res.status(404).json({ error: 'Event not found' });
+
+        // SECURITY FIX: Check for Expiration
+        if (event.expiresAt && new Date() > new Date(event.expiresAt)) {
+            const authHeader = req.headers['authorization'];
+            let isAuthorizedExpired = false;
+            
+            if (authHeader) {
+                const token = authHeader.split(' ')[1];
+                try {
+                    const user = jwt.verify(token, JWT_SECRET);
+                    if (user.role === 'ADMIN' || user.id === event.hostId) {
+                        isAuthorizedExpired = true;
+                    }
+                } catch (e) {}
+            }
+
+            if (!isAuthorizedExpired) {
+                return res.status(403).json({ error: 'Event expired' });
+            }
+        }
 
         // SECURITY: Check if user is authorized to see the PIN
         const authHeader = req.headers['authorization'];
@@ -974,6 +983,13 @@ app.post('/api/media', upload.single('file'), async (req, res) => {
 
             const processVideo = async () => {
                 const inputPath = req.file.path;
+                
+                // SECURITY FIX: Ensure inputPath is safe (though req.file.path from multer is generally safe)
+                if (!inputPath.startsWith(uploadDir)) {
+                    console.error("Invalid file path for FFmpeg");
+                    return;
+                }
+
                 const outputFilename = `preview_${path.parse(req.file.filename).name}.mp4`;
                 const outputPath = path.join(uploadDir, outputFilename);
                 const previewKey = `events/${body.eventId}/preview_${body.id}.mp4`;

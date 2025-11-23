@@ -1,9 +1,9 @@
-
-
 import React, { useState } from 'react';
 import { X, Sparkles, ShieldCheck, Lock } from 'lucide-react';
 import { EVENT_THEMES } from '../constants';
-import { generateEventDescription } from '../services/geminiService';
+// SECURITY FIX: Use the secure backend API proxy instead of direct Gemini client
+// This prevents exposing the API Key on the frontend.
+import { api } from '../services/api';
 import { TranslateFn, UserRole, User } from '../types';
 
 interface CreateEventModalProps {
@@ -38,9 +38,17 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({ currentUser,
     if (!title) return;
     setIsGeneratingDesc(true);
     const dateStr = (includeDate && date) ? date : "soon";
-    const desc = await generateEventDescription(title, dateStr, theme);
-    setDescription(desc);
-    setIsGeneratingDesc(false);
+    
+    // SECURITY FIX: Call backend endpoint
+    try {
+        const desc = await api.generateEventDescription(title, dateStr, theme);
+        setDescription(desc);
+    } catch (error) {
+        console.error("Failed to generate description", error);
+        setDescription(`Join us for a amazing ${theme.toLowerCase()}!`);
+    } finally {
+        setIsGeneratingDesc(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {

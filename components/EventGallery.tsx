@@ -17,21 +17,36 @@ declare global {
 // Internal Component for Video Item handling intersection
 const VideoGridItem: React.FC<{ item: MediaItem; onClick: () => void }> = ({ item, onClick }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const isMobile = isMobileDevice(); // Check device type
     
     useEffect(() => {
+        // On mobile, we disable the intersection observer entirely to prevent
+        // auto-play issues and save battery/data. We just show the video element
+        // which should display the first frame if preload="metadata" works.
+        if (isMobile) return;
+
         const observer = new IntersectionObserver(
             (entries) => {
                 entries.forEach((entry) => {
                     if (videoRef.current) {
                         if (entry.isIntersecting) {
-                            videoRef.current.play().catch(() => {});
+                            const playPromise = videoRef.current.play();
+                            if (playPromise !== undefined) {
+                                playPromise
+                                    .then(() => setIsPlaying(true))
+                                    .catch(() => {
+                                        setIsPlaying(false);
+                                    });
+                            }
                         } else {
                             videoRef.current.pause();
+                            setIsPlaying(false);
                         }
                     }
                 });
             },
-            { threshold: 0.5 } // Play when 50% visible
+            { threshold: 0.25 } 
         );
 
         if (videoRef.current) {
@@ -41,7 +56,7 @@ const VideoGridItem: React.FC<{ item: MediaItem; onClick: () => void }> = ({ ite
         return () => {
             if (videoRef.current) observer.unobserve(videoRef.current);
         };
-    }, []);
+    }, [isMobile]);
 
     if (item.isProcessing) {
         return (
@@ -54,20 +69,30 @@ const VideoGridItem: React.FC<{ item: MediaItem; onClick: () => void }> = ({ ite
 
     return (
         <div className="relative group cursor-pointer" onClick={onClick}>
-            {/* pointer-events-none ensures the click passes to the parent div, opening the lightbox */}
             <video 
                 ref={videoRef}
                 src={item.previewUrl || item.url} 
-                className="w-full h-auto object-cover rounded-lg pointer-events-none" 
+                className="w-full h-auto object-cover rounded-lg pointer-events-none bg-black min-h-[150px]" 
                 muted 
                 playsInline 
                 loop 
-                preload="metadata"
+                preload="metadata" 
             />
-            <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors pointer-events-none">
-                <Play className="text-white/80 fill-white/80" size={32} />
+            
+            {/* Play Icon Overlay */}
+            <div className={`absolute inset-0 flex items-center justify-center transition-colors pointer-events-none ${
+                isMobile 
+                    ? 'bg-black/10' // Always slight overlay on mobile
+                    : (isPlaying ? 'bg-transparent' : 'bg-black/20 group-hover:bg-black/30')
+            }`}>
+                {(!isPlaying || isMobile) && (
+                    <div className="bg-black/40 rounded-full p-3 backdrop-blur-sm border border-white/20">
+                        <Play className="text-white fill-white" size={24} />
+                    </div>
+                )}
             </div>
-            <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-md pointer-events-none">
+
+            <div className="absolute top-2 right-2 bg-black/60 p-1.5 rounded-md pointer-events-none z-10 backdrop-blur-md">
                 <Video className="text-white" size={12} />
             </div>
         </div>
@@ -896,8 +921,9 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
                                         src={item.url} 
                                         controls 
                                         autoPlay={offset === 0 && isSlideshowPlaying} 
-                                        className="max-w-full max-h-full rounded-lg shadow-2xl object-contain bg-black" 
+                                        className="max-w-full max-h-full rounded-lg shadow-2xl object-contain bg-black pointer-events-none" // pointer-events-none is KEY here
                                         playsInline
+                                        muted
                                       />
                                   ) : (
                                       <img 

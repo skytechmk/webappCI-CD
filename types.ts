@@ -65,6 +65,11 @@ export const getTierConfigForUser = (user: User | null): TierConfig => {
   return TIER_CONFIG[user?.tier || TierLevel.FREE];
 };
 
+// ADDED: Helper to get config based on simple TierLevel enum (for guests)
+export const getTierConfig = (tier: TierLevel): TierConfig => {
+    return TIER_CONFIG[tier];
+};
+
 export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
 
 export interface User {
@@ -140,6 +145,8 @@ export interface Event {
   // Analytics
   views?: number;
   downloads?: number;
+  // NEW: Host Tier for guest capability checks
+  hostTier?: TierLevel;
 }
 
 export interface PricingTier {

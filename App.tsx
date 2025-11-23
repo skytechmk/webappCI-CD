@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 // @ts-ignore
 import { jwtDecode } from 'jwt-decode';
-import { User, Event, MediaItem, UserRole, TierLevel, Language, TranslateFn, TIER_CONFIG, getTierConfigForUser } from './types';
+import { User, Event, MediaItem, UserRole, TierLevel, Language, TranslateFn, TIER_CONFIG, getTierConfigForUser, getTierConfig } from './types';
 import { api } from './services/api';
 import { TRANSLATIONS } from './constants';
 import { CameraCapture } from './components/CameraCapture';
@@ -43,36 +43,12 @@ const sanitizeInput = (input: string): string => {
   return input.replace(/[<>]/g, '').trim();
 };
 
-// Security: Simple encryption for sensitive localStorage data
-const encryptData = (data: string): string => {
-  // Simple XOR-based obfuscation for demonstration
-  // In production, use proper encryption like AES with a secure key
-  const key = 'snapify-secure-key-2025';
-  let result = '';
-  for (let i = 0; i < data.length; i++) {
-    result += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length));
-  }
-  return btoa(result);
-};
-
-const decryptData = (encryptedData: string): string => {
-  try {
-    const key = 'snapify-secure-key-2025';
-    const decoded = atob(encryptedData);
-    let result = '';
-    for (let i = 0; i < decoded.length; i++) {
-      result += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
-    }
-    return result;
-  } catch {
-    return '';
-  }
-};
-
-// Security: Safe localStorage operations
+// SECURITY FIX: Removed insecure client-side "encryption".
+// Using localStorage directly is better than a false sense of security.
+// For true security, switch to HttpOnly cookies in a future update.
 const safeSetItem = (key: string, value: string) => {
   try {
-    localStorage.setItem(key, encryptData(value));
+    localStorage.setItem(key, value);
   } catch (error) {
     console.warn('Failed to save to localStorage:', error);
   }
@@ -80,8 +56,7 @@ const safeSetItem = (key: string, value: string) => {
 
 const safeGetItem = (key: string): string => {
   try {
-    const encrypted = localStorage.getItem(key);
-    return encrypted ? decryptData(encrypted) : '';
+    return localStorage.getItem(key) || '';
   } catch (error) {
     console.warn('Failed to read from localStorage:', error);
     return '';
@@ -131,22 +106,43 @@ export default function App() {
   // Preview & Upload State
   const [previewMedia, setPreviewMedia] = useState<{ type: 'image'|'video', src: string, file?: File } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0); // NEW STATE
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // -- Real-time User Updates --
+  // -- FIX: Auto-Persistence --
+  // This ensures that ANY change to currentUser (via API or Socket) is immediately saved.
   useEffect(() => {
     if (currentUser) {
+        localStorage.setItem('snapify_user_obj', JSON.stringify(currentUser));
+    }
+  }, [currentUser]);
+
+  // -- Real-time User Updates --
+  useEffect(() => {
+    if (currentUser?.id) {
         socketService.connect();
+        
         const handleUserUpdate = (updatedUser: User) => {
+            // 1. Update Current User State
             if (updatedUser.id === currentUser.id) {
-                setCurrentUser(prev => ({ ...prev!, ...updatedUser }));
-                localStorage.setItem('snapify_user_obj', JSON.stringify({ ...currentUser, ...updatedUser }));
+                setCurrentUser(prev => {
+                    if (!prev) return null;
+                    // Merge with previous state to ensure we don't lose fields 
+                    // if the update payload is partial
+                    return { ...prev, ...updatedUser };
+                });
             }
+            
+            // 2. Update Admin List State
             setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
         };
+
         socketService.on('user_updated', handleUserUpdate);
-        return () => { socketService.off('user_updated'); };
+        
+        return () => { 
+            socketService.off('user_updated', handleUserUpdate);
+        };
     }
   }, [currentUser?.id]);
 
@@ -577,10 +573,36 @@ export default function App() {
   const confirmUpload = async (userCaption: string, userPrivacy: 'public' | 'private') => {
     if (!activeEvent || !previewMedia) return;
     setIsUploading(true);
+    setUploadProgress(0); // Reset progress
+
     try {
         const { type, src, file } = previewMedia;
         const uploader = currentUser ? (currentUser.studioName || currentUser.name) : guestName || "Guest";
         const fileSizeMb = file ? file.size / (1024 * 1024) : (src.length * (3/4)) / (1024*1024);
+        
+        // SECURITY FIX: Use activeEvent.hostTier to determine capabilities
+        // The event capabilities are determined by the HOST's tier, not the uploader's tier.
+        
+        if (type === 'video') {
+             // Determine the effective tier configuration
+             let config;
+             if (currentUser && activeEvent.hostId === currentUser.id) {
+                 // I am the host
+                 config = getTierConfigForUser(currentUser);
+             } else if (activeEvent.hostTier) {
+                 // I am a guest, use the host's tier from the event data
+                 config = getTierConfig(activeEvent.hostTier);
+             } else {
+                 // Fallback (should rarely happen if backend returns hostTier)
+                 config = TIER_CONFIG[TierLevel.FREE];
+             }
+
+             if (!config.allowVideo) {
+                alert(t('videoRestricted'));
+                setIsUploading(false);
+                return;
+            }
+        }
         
         if (currentUser) {
             if (currentUser.storageUsedMb + fileSizeMb > currentUser.storageLimitMb) {
@@ -589,14 +611,7 @@ export default function App() {
                 return;
             }
         }
-        if (type === 'video' && currentUser) {
-            const config = getTierConfigForUser(currentUser);
-            if (!config.allowVideo) {
-                alert(t('videoRestricted'));
-                setIsUploading(false);
-                return;
-            }
-        }
+        
         let finalCaption = userCaption;
         if (!finalCaption && type === 'image') {
              finalCaption = await api.generateImageCaption(src);
@@ -630,7 +645,10 @@ export default function App() {
         };
 
         if (uploadFile) {
-            await api.uploadMedia(uploadFile, metadata, activeEvent.id);
+            // Use new uploadMedia with progress callback
+            await api.uploadMedia(uploadFile, metadata, activeEvent.id, (percent) => {
+                setUploadProgress(percent);
+            });
         }
         if (currentUser) {
             updateUserStorage(currentUser.id, fileSizeMb);
@@ -642,6 +660,7 @@ export default function App() {
         alert("Upload failed. Please try again.");
     } finally {
         setIsUploading(false);
+        setUploadProgress(0);
     }
   };
 
@@ -880,7 +899,14 @@ export default function App() {
       {/* FLOATING ELEMENTS & MODALS (Outside scroll view to stay on top) */}
       {view !== 'landing' && <PWAInstallPrompt t={t} />}
       
-      <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*" onChange={handleFileUpload} />
+      {/* MODIFIED: Update file input accept attribute to be more inclusive for mobile */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        className="hidden" 
+        accept="image/*,video/*" 
+        onChange={handleFileUpload} 
+      />
       
       {previewMedia && (
         <MediaReviewModal
@@ -893,6 +919,7 @@ export default function App() {
             }}
             onCancel={() => setPreviewMedia(null)}
             isUploading={isUploading}
+            uploadProgress={uploadProgress} // Pass progress
             isRegistered={!!currentUser}
             t={t}
         />

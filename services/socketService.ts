@@ -35,9 +35,13 @@ class SocketService {
         }
     }
 
-    off(event: string) {
+    off(event: string, callback?: (data: any) => void) {
         if (this.socket) {
-            this.socket.off(event);
+            if (callback) {
+                this.socket.off(event, callback);
+            } else {
+                this.socket.off(event);
+            }
         }
     }
 }

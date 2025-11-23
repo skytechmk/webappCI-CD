@@ -163,7 +163,13 @@ export const api = {
     },
 
     // Media - Updated to handle Privacy field and uploaderId
-    uploadMedia: async (file: File, metadata: Partial<MediaItem>, eventId: string): Promise<MediaItem> => {
+    // MODIFIED: Added onProgress callback
+    uploadMedia: async (
+        file: File, 
+        metadata: Partial<MediaItem>, 
+        eventId: string,
+        onProgress?: (percent: number) => void
+    ): Promise<MediaItem> => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('id', metadata.id!);
@@ -179,11 +185,42 @@ export const api = {
         // NEW: Privacy
         formData.append('privacy', metadata.privacy || 'public');
 
-        const res = await fetch(`${API_URL}/api/media`, {
-            method: 'POST',
-            body: formData
+        // Use XMLHttpRequest for progress tracking
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `${API_URL}/api/media`);
+            
+            // Add auth headers if token exists
+            const token = localStorage.getItem('snapify_token');
+            if (token) {
+                xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+            }
+
+            if (onProgress) {
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable) {
+                        const percentComplete = Math.round((event.loaded / event.total) * 100);
+                        onProgress(percentComplete);
+                    }
+                };
+            }
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        resolve(response);
+                    } catch (e) {
+                        reject(new Error('Invalid JSON response'));
+                    }
+                } else {
+                    reject(new Error(xhr.statusText));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send(formData);
         });
-        return res.json();
     },
     uploadBase64Media: async (base64Data: string, metadata: Partial<MediaItem>, eventId: string): Promise<MediaItem> => {
         const fetchRes = await fetch(base64Data);

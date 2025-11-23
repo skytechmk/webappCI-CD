@@ -9,7 +9,7 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { User, UserRole, TierLevel, Event, TranslateFn, MediaItem } from '../types';
-import { Trash2, HardDrive, Zap, Calendar, Image as ImageIcon, X, Clock, Eye, Plus, Edit, Save, Camera, Briefcase, AlertTriangle, ZoomIn, Download, Lock, ArrowLeft, LogOut, Mail, Building, ShieldAlert, Users, LayoutGrid, Settings } from 'lucide-react';
+import { Trash2, HardDrive, Zap, Calendar, Image as ImageIcon, X, Clock, Eye, Plus, Edit, Save, Camera, Briefcase, AlertTriangle, ZoomIn, Download, Lock, ArrowLeft, LogOut, Mail, Building, ShieldAlert, Users, LayoutGrid, Settings, Crown, Star } from 'lucide-react';
 import { api } from '../services/api';
 
 interface AdminDashboardProps {
@@ -113,6 +113,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const getUserEventCount = (userId: string) => {
     return events.filter(e => e.hostId === userId).length;
   };
+
+  // Helper to render tier badge in admin table
+  const renderTierBadge = (tier: TierLevel) => {
+    let badgeColor = 'bg-green-50 text-green-700 border-green-200';
+    let icon = null;
+
+    if (tier === TierLevel.STUDIO) {
+        badgeColor = 'bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-900 border-amber-300';
+        icon = <Crown size={10} className="mr-1 fill-amber-700" />;
+    } else if (tier === TierLevel.PRO) {
+        badgeColor = 'bg-purple-50 text-purple-700 border-purple-200';
+        icon = <Zap size={10} className="mr-1 fill-purple-500" />;
+    } else if (tier === TierLevel.BASIC) {
+        badgeColor = 'bg-blue-50 text-blue-700 border-blue-200';
+        icon = <Star size={10} className="mr-1 fill-blue-500" />;
+    } else {
+        // FREE
+        badgeColor = 'bg-slate-100 text-slate-600 border-slate-200';
+    }
+
+    return (
+        <span className={`px-2.5 py-1 inline-flex items-center text-xs leading-5 font-bold rounded-full border ${badgeColor}`}>
+            {icon}
+            {tier}
+        </span>
+    );
+  };
+
 
   // --- Actions ---
 
@@ -533,13 +561,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </div>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
-                                    <span className={`px-2.5 py-1 inline-flex text-xs leading-5 font-bold rounded-full border 
-                                        ${user.tier === TierLevel.STUDIO ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                                        user.tier === TierLevel.PRO ? 'bg-purple-50 text-purple-700 border-purple-200' : 
-                                        user.tier === TierLevel.BASIC ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 
-                                        'bg-green-50 text-green-700 border-green-200'}`}>
-                                        {user.tier}
-                                    </span>
+                                    {renderTierBadge(user.tier)}
                                 </td>
                                 <td className="px-6 py-4 pr-8 whitespace-nowrap text-right text-sm font-medium">
                                 {user.role !== UserRole.ADMIN && (

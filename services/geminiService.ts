@@ -1,84 +1,55 @@
-import { GoogleGenAI } from "@google/genai";
+// SECURITY FIX: 
+// This file acts as the primary AI service layer.
+// It first attempts to use the local Ollama service if available.
+// If Ollama is unavailable or fails, it falls back to the secure backend API (Gemini).
+
+import { api } from './api';
 import { generateEventDescriptionWithOllama, generateImageCaptionWithOllama, isOllamaAvailable } from './ollamaService';
 
-// Safe access to env variables for environments where import.meta.env might be undefined
-// @ts-ignore
-const env: any = import.meta.env || {};
-
-const getAiClient = () => {
-  // API Key must be obtained exclusively from process.env.API_KEY
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.warn("Gemini API Key is missing in .env file");
-    return null;
-  }
-  return new GoogleGenAI({ apiKey });
-};
-
+/**
+ * Securely generates an event description.
+ * Priority: Local Ollama -> Backend API (Gemini) -> Default Text
+ */
 export const generateEventDescription = async (title: string, date: string, type: string): Promise<string> => {
-  // Attempt to use local Ollama instance first
+  // 1. Try Ollama first (Local AI)
   try {
     if (await isOllamaAvailable()) {
+      console.log("Using Ollama for event description...");
       return await generateEventDescriptionWithOllama(title, date, type);
     }
   } catch (error) {
-    // Silent fail for Ollama
+    console.warn("Ollama unavailable, falling back to Cloud AI.");
   }
 
-  // Fallback to Gemini
-  const ai = getAiClient();
-  if (!ai) return "Join us for an amazing celebration!";
-
+  // 2. Fallback to Backend API (Cloud AI / Gemini)
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Write a short, exciting, and inviting description (max 2 sentences) for a ${type} event named "${title}" happening on ${date}. Use emojis.`,
-    });
-    return response.text;
+    return await api.generateEventDescription(title, date, type);
   } catch (error) {
-    console.error("Error generating description:", error);
+    console.warn("AI Generation failed, falling back to default.");
     return "Join us for an amazing celebration!";
   }
 };
 
+/**
+ * Securely generates an image caption.
+ * Priority: Local Ollama -> Backend API (Gemini) -> Default Text
+ */
 export const generateImageCaption = async (base64Image: string): Promise<string> => {
-  // Attempt to use local Ollama instance first
+  // 1. Try Ollama first (Local AI)
   try {
     if (await isOllamaAvailable()) {
+      console.log("Using Ollama for image caption...");
       return await generateImageCaptionWithOllama(base64Image);
     }
   } catch (error) {
-    // Silent fail for Ollama
+    console.warn("Ollama unavailable, falling back to Cloud AI.");
   }
 
-  // Fallback to Gemini
-  const ai = getAiClient();
-  if (!ai) return "Event memory";
-
+  // 2. Fallback to Backend API (Cloud AI / Gemini)
   try {
-    // Clean base64 string if it has data URI prefix
-    const cleanBase64 = base64Image.split(',')[1] || base64Image;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: cleanBase64
-            }
-          },
-          {
-            // Updated prompt to include searchable keywords
-            text: "Generate a short caption (max 10 words) for this photo. Include key objects, colors, or the mood (e.g., 'Birthday cake with candles', 'People dancing happily')."
-          }
-        ]
-      }
-    });
-    return response.text;
+    return await api.generateImageCaption(base64Image);
   } catch (error) {
-    console.error("Error generating caption:", error);
+    console.warn("AI Caption failed, falling back to default.");
     return "Captured moment";
   }
 };

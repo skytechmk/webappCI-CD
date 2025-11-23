@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Sparkles, Zap, Clock, Calendar, Image as ImageIcon, User as UserIcon, Crown } from 'lucide-react';
+import { Plus, Sparkles, Zap, Clock, Calendar, Image as ImageIcon, User as UserIcon, Crown, Star } from 'lucide-react';
 import { Event, User, TranslateFn, TierLevel, UserRole } from '../types';
 
 interface UserDashboardProps {
@@ -20,33 +20,65 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   t
 }) => {
   
-  // Helper to render the "Upgrade" button for free tier users
-  const renderUpgradeButton = () => {
-    if (currentUser.tier !== TierLevel.FREE) return null;
+  // Helper to render tier badge
+  const renderTierBadge = (tier: TierLevel) => {
+    if (tier === TierLevel.FREE) return (
+        <span className="flex items-center px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border bg-slate-100 text-slate-500 border-slate-200">
+            FREE PLAN
+        </span>
+    );
+    
+    let badgeColor = 'bg-indigo-100 text-indigo-700 border-indigo-200';
+    let icon = null;
+    
+    // FIX: Explicitly type 'text' as string to allow custom label assignment
+    let text: string = tier;
+
+    if (tier === TierLevel.STUDIO) {
+        badgeColor = 'bg-gradient-to-r from-amber-200 to-yellow-400 text-amber-900 border-amber-300 shadow-sm';
+        icon = <Crown size={12} className="mr-1.5 fill-amber-700" />;
+        text = 'STUDIO PLAN';
+    } else if (tier === TierLevel.PRO) {
+        badgeColor = 'bg-purple-100 text-purple-700 border-purple-200';
+        icon = <Zap size={12} className="mr-1.5 fill-purple-500" />;
+        text = 'PRO PLAN';
+    } else if (tier === TierLevel.BASIC) {
+        badgeColor = 'bg-blue-100 text-blue-700 border-blue-200';
+        icon = <Star size={12} className="mr-1.5 fill-blue-500" />;
+        text = 'BASIC PLAN';
+    }
 
     return (
-      <button 
-        onClick={onRequestUpgrade}
-        className="w-full sm:w-auto bg-gradient-to-r from-amber-200 to-yellow-400 text-amber-900 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center space-x-2 hover:shadow-lg hover:scale-[1.02] transition-all"
-        title="Upgrade your plan"
-      >
-        <Crown size={20} />
-        <span>{t('contactSales')}</span>
-      </button>
+        <span className={`flex items-center px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${badgeColor}`}>
+            {icon}
+            {text}
+        </span>
     );
   };
 
   return (
     <main className="max-w-5xl mx-auto px-4 py-8">
       {/* Header Section */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-8 gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">{t('myEvents')}</h2>
+          <div className="flex items-center gap-3 mb-1">
+              <h2 className="text-2xl font-bold text-slate-900">{t('myEvents')}</h2>
+              {renderTierBadge(currentUser.tier)}
+          </div>
           <p className="text-slate-500">{t('manageEvents')}</p>
         </div>
         
         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-          {renderUpgradeButton()}
+          {currentUser.tier === TierLevel.FREE && (
+              <button 
+                onClick={onRequestUpgrade}
+                className="w-full sm:w-auto bg-gradient-to-r from-amber-200 to-yellow-400 text-amber-900 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center space-x-2 hover:shadow-lg hover:scale-[1.02] transition-all"
+                title="Upgrade your plan"
+              >
+                <Crown size={20} />
+                <span>{t('contactSales')}</span>
+              </button>
+          )}
           
           <button 
             onClick={onNewEvent}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Zap, Globe, Briefcase, Camera, User as UserIcon, LogOut, Settings, ChevronLeft, Shield, LogIn, Crown } from 'lucide-react';
+import { Zap, Globe, Briefcase, Camera, User as UserIcon, LogOut, Settings, ChevronLeft, Shield, LogIn, Crown, Star } from 'lucide-react';
 import { User, UserRole, Language, TranslateFn, TierLevel } from '../types';
 
 interface NavigationProps {
@@ -40,7 +40,11 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   // Helper to render tier badge
   const renderTierBadge = (tier: TierLevel) => {
-    if (tier === TierLevel.FREE) return null;
+    if (tier === TierLevel.FREE) return (
+        <span className="flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border bg-slate-100 text-slate-500 border-slate-200 ml-2">
+            FREE
+        </span>
+    );
     
     let badgeColor = 'bg-indigo-100 text-indigo-700 border-indigo-200';
     let icon = null;
@@ -51,6 +55,9 @@ export const Navigation: React.FC<NavigationProps> = ({
     } else if (tier === TierLevel.PRO) {
         badgeColor = 'bg-purple-100 text-purple-700 border-purple-200';
         icon = <Zap size={10} className="mr-1 fill-purple-500" />;
+    } else if (tier === TierLevel.BASIC) {
+        badgeColor = 'bg-blue-100 text-blue-700 border-blue-200';
+        icon = <Star size={10} className="mr-1 fill-blue-500" />;
     }
 
     return (
