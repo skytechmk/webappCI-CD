@@ -15,6 +15,15 @@ export const PWAInstallPrompt: React.FC<{ t: TranslateFn }> = ({ t }) => {
     // Check if already running in standalone mode (installed)
     const isInStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
     setIsStandalone(isInStandalone);
+
+    // iOS-specific: Don't show install prompt immediately to prevent conflicts
+    if (isIOS() && !isInStandalone) {
+      // Delay PWA prompt on iOS to prevent interference with initial load
+      const timer = setTimeout(() => {
+        setIsVisible(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
   }, []);
 
   // Don't show anything if already installed or dismissed

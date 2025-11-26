@@ -12,67 +12,39 @@ interface ContactModalProps {
 }
 
 export const ContactModal: React.FC<ContactModalProps> = ({ onClose, t, tier: initialTier }) => {
-  const [selectedTier, setSelectedTier] = useState<TierLevel | null>(initialTier || null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+   const [selectedTier, setSelectedTier] = useState<TierLevel | null>(initialTier || null);
 
-  const isMobile = isMobileDevice();
-  const isApple = isIOS();
-  const isGoogle = isAndroid();
+   const isMobile = isMobileDevice();
+   const isApple = isIOS();
+   const isGoogle = isAndroid();
 
-  const phoneNumber = '+41779586845';
-  const formattedPhone = '+41 77 958 68 45';
+   const phoneNumber = '+41779586845';
+   const formattedPhone = '+41 77 958 68 45';
+   const email = 'admin@skytech.mk';
 
-  // Get all pricing tiers
-  const pricingTiers = getPricingTiers(t);
+   // Get all pricing tiers
+   const pricingTiers = getPricingTiers(t);
 
-  // Get tier name
-  const getTierName = (tierLevel: TierLevel) => {
-    const tier = pricingTiers.find(t => t.id === tierLevel);
-    return tier?.name || '';
-  };
+   // Get tier name
+   const getTierName = (tierLevel: TierLevel) => {
+     const tier = pricingTiers.find(t => t.id === tierLevel);
+     return tier?.name || '';
+   };
 
-  const submitUpgradeRequest = async () => {
-    if (!selectedTier) return;
+   // Generate prewritten message
+   const getMessage = (tierLevel: TierLevel, method: string) => {
+     const tierName = getTierName(tierLevel);
+     const baseMessage = `Hello! I'm interested in upgrading to the ${tierName} tier for SnapifY. Please provide me with pricing details and next steps.`;
 
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      const contactMethod = isMobile ? 'WhatsApp/Phone' : 'Email';
-      const response = await fetch('/api/upgrade-request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('snapify_token') || ''}`
-        },
-        body: JSON.stringify({
-          tier: selectedTier,
-          contactMethod: contactMethod,
-          message: `User requested upgrade to ${getTierName(selectedTier)} tier`
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to submit upgrade request');
-      }
-
-      const result = await response.json();
-      setIsSubmitted(true);
-
-      // Auto-close after 3 seconds
-      setTimeout(() => {
-        onClose();
-      }, 3000);
-
-    } catch (err) {
-      console.error('Upgrade request failed:', err);
-      setError('Failed to submit upgrade request. Please try contacting us directly.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+     if (method === 'whatsapp') {
+       return encodeURIComponent(baseMessage);
+     } else if (method === 'viber') {
+       return encodeURIComponent(baseMessage);
+     } else if (method === 'email') {
+       return encodeURIComponent(`Subject: SnapifY ${tierName} Tier Inquiry\n\n${baseMessage}`);
+     }
+     return '';
+   };
 
   // Helper to render tier badge
   const renderTierBadge = (tier: PricingTier) => {
@@ -103,129 +75,109 @@ export const ContactModal: React.FC<ContactModalProps> = ({ onClose, t, tier: in
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
         <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 relative">
-              <button 
-                onClick={onClose} 
+              <button
+                onClick={onClose}
                 className="absolute top-4 right-4 p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"
               >
                   <X size={20} className="text-slate-500" />
               </button>
+
               <div className="text-center mb-6">
                   <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Crown size={32} />
                   </div>
-                  <h3 className="text-2xl font-bold text-slate-900">Choose Your Plan</h3>
+                  <h3 className="text-2xl font-bold text-slate-900">Contact Sales</h3>
                   <p className="text-slate-500 mt-2">
-                      Select the tier you'd like to upgrade to. An administrator will contact you to complete the upgrade.
+                      Choose your preferred contact method to discuss {selectedTier ? getTierName(selectedTier) : 'your'} plan upgrade.
                   </p>
               </div>
 
-              {isSubmitted ? (
-                <div className="text-center mb-6">
-                  <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <CheckCircle size={32} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-slate-900">Upgrade Request Submitted!</h3>
-                  <p className="text-slate-500 mt-2">
-                      Your request for the {selectedTier && getTierName(selectedTier)} tier has been sent successfully. An administrator will contact you soon to complete the upgrade.
-                  </p>
-                </div>
-              ) : error ? (
-                <div className="text-center mb-6">
-                  <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <AlertCircle size={32} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-slate-900">Request Failed</h3>
-                  <p className="text-slate-500 mt-2">{error}</p>
-                  <div className="mt-6 space-y-4">
-                    <p className="text-sm text-slate-600">Please contact us directly:</p>
-                    <div className="space-y-3">
-                      <a
-                        href="https://wa.me/41779586845"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-center p-3 bg-green-50 rounded-xl border border-green-100 hover:border-green-300 hover:bg-green-100 transition-colors group"
-                      >
-                          <MessageCircle size={20} className="mr-2 text-green-600" />
-                          <span className="font-medium text-green-900">WhatsApp: {formattedPhone}</span>
-                      </a>
-                      <a
-                        href="mailto:admin@skytech.mk"
-                        className="flex items-center justify-center p-3 bg-slate-50 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors group"
-                      >
-                          <Mail size={20} className="mr-2 group-hover:text-indigo-600" />
-                          <span className="font-medium text-slate-900">admin@skytech.mk</span>
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4 mb-6">
-                  {pricingTiers.filter(tier => tier.id !== TierLevel.FREE).map(tier => (
-                    <div
-                      key={tier.id}
-                      onClick={() => setSelectedTier(tier.id)}
-                      className={`relative p-4 border rounded-xl cursor-pointer transition-all ${
-                        selectedTier === tier.id
-                          ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200'
-                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          {renderTierBadge(tier)}
-                          <h4 className="font-bold text-slate-900">{tier.name}</h4>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-2xl font-black text-slate-900">{tier.price}</span>
-                          {tier.id !== TierLevel.STUDIO && <span className="text-slate-500">/{t('event')}</span>}
-                        </div>
+              {/* Tier Selection */}
+              <div className="space-y-4 mb-6">
+                <h4 className="font-semibold text-slate-900 mb-3">Select Plan:</h4>
+                {pricingTiers.filter(tier => tier.id !== TierLevel.FREE).map(tier => (
+                  <div
+                    key={tier.id}
+                    onClick={() => setSelectedTier(tier.id)}
+                    className={`relative p-4 border rounded-xl cursor-pointer transition-all ${
+                      selectedTier === tier.id
+                        ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200'
+                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {renderTierBadge(tier)}
+                        <h4 className="font-bold text-slate-900">{tier.name}</h4>
                       </div>
-                      <p className="text-sm text-slate-600 mb-3">{tier.limit}</p>
-                      <ul className="space-y-1">
-                        {tier.features.slice(0, 2).map((feature, idx) => (
-                          <li key={idx} className="text-xs text-slate-600 flex items-center">
-                            <div className="w-1 h-1 bg-slate-400 rounded-full mr-2"></div>
-                            {feature}
-                          </li>
-                        ))}
-                      </ul>
-                      {selectedTier === tier.id && (
-                        <div className="absolute top-2 right-2 w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center">
-                          <div className="w-2 h-2 bg-white rounded-full"></div>
-                        </div>
-                      )}
+                      <div className="text-right">
+                        <span className="text-2xl font-black text-slate-900">{tier.price}</span>
+                        {tier.id !== TierLevel.STUDIO && <span className="text-slate-500">/{t('event')}</span>}
+                      </div>
                     </div>
-                  ))}
+                    <p className="text-sm text-slate-600">{tier.limit}</p>
+                    {selectedTier === tier.id && (
+                      <div className="absolute top-2 right-2 w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center">
+                        <div className="w-2 h-2 bg-white rounded-full"></div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Contact Methods */}
+              {selectedTier && (
+                <div className="space-y-4">
+                  <h4 className="font-semibold text-slate-900">Contact Methods:</h4>
+
+                  {/* WhatsApp */}
+                  <a
+                    href={`https://wa.me/${phoneNumber}?text=${getMessage(selectedTier, 'whatsapp')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center p-4 bg-green-50 rounded-xl border border-green-100 hover:border-green-300 hover:bg-green-100 transition-all group"
+                  >
+                      <MessageCircle size={24} className="mr-3 text-green-600" />
+                      <div className="text-left">
+                        <div className="font-bold text-green-900">WhatsApp</div>
+                        <div className="text-sm text-green-700">{formattedPhone}</div>
+                      </div>
+                  </a>
+
+                  {/* Viber */}
+                  <a
+                    href={`viber://chat?number=${phoneNumber}&text=${getMessage(selectedTier, 'viber')}`}
+                    className="flex items-center justify-center p-4 bg-purple-50 rounded-xl border border-purple-100 hover:border-purple-300 hover:bg-purple-100 transition-all group"
+                  >
+                      <Smartphone size={24} className="mr-3 text-purple-600" />
+                      <div className="text-left">
+                        <div className="font-bold text-purple-900">Viber</div>
+                        <div className="text-sm text-purple-700">{formattedPhone}</div>
+                      </div>
+                  </a>
+
+                  {/* Email */}
+                  <a
+                    href={`mailto:${email}?body=${getMessage(selectedTier, 'email')}`}
+                    className="flex items-center justify-center p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all group"
+                  >
+                      <Mail size={24} className="mr-3 group-hover:text-indigo-600" />
+                      <div className="text-left">
+                        <div className="font-bold text-slate-900">Email</div>
+                        <div className="text-sm text-slate-600">{email}</div>
+                      </div>
+                  </a>
                 </div>
               )}
 
-              {!isSubmitted && !error && (
-                <div className="flex gap-3">
-                  <button
-                    onClick={onClose}
-                    className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={submitUpgradeRequest}
-                    disabled={!selectedTier || isSubmitting}
-                    className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        Submitting...
-                      </>
-                    ) : (
-                      <>
-                        <Crown size={16} />
-                        Request Upgrade
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
+              <div className="mt-6 pt-4 border-t border-slate-200">
+                <button
+                  onClick={onClose}
+                  className="w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
         </div>
     </div>
   );

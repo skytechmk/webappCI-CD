@@ -2,12 +2,11 @@ import { Language, TierLevel, PricingTier, TranslateFn } from './types';
 
 export const TRANSLATIONS: Record<Language, Record<string, string>> = {
   en: {
-    // ... existing translations ...
     appName: "SnapifY",
-    appSubtitle: "Event Sharing Platform", // Added this
-    heroTitlePrefix: "Relive the Magic,",
-    heroTitleSuffix: "Forever Yours",
-    heroDesc: "Create shared albums for birthdays, weddings, and parties in seconds. Let your guests capture the magic with AI-enhanced organization.",
+    appSubtitle: "Event Sharing Platform",
+    heroTitlePrefix: "Every Angle.",
+    heroTitleSuffix: "Every Moment.",
+    heroDesc: "The modern digital guestbook. Collect photos and videos from every guest in real-time without them downloading an app.",
     getStarted: "Get Started",
     adminDemo: "Admin Demo",
     signIn: "Sign In",
@@ -23,7 +22,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     forProfessionals: "For Professionals",
     event: "event",
     currentPlan: "Current Plan",
-    contactSales: "Upgrade Tier",
+    contactSales: "Contact Sales",
     startFree: "Start for Free",
     myEvents: "My Events",
     manageEvents: "Manage your parties and albums",
@@ -226,14 +225,11 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     by: "by",
     close: "Close",
     findMeDevMode: "⚠️ Experimental Feature: This feature is currently in development.",
-    // PWA Strings
     installApp: "Install App",
     installAppDesc: "Install SnapifY for a better experience.",
-    // New UI Strings
     addMemory: "Add Memory",
     tapToUpload: "TAP TO UPLOAD",
     loginHost: "Already have an account? Sign In",
-    // New Modal Strings
     chooseAccess: "How would you like to join?",
     guestAccess: "Guest Access",
     continueAsGuest: "Continue as Guest",
@@ -241,8 +237,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Public Gallery",
     memberLogin: "Login / Sign Up",
     privateUploadsHistory: "Private uploads & event history",
-    
-    // Mobile Contact Options
     mobileFriendly: "Mobile Optimized",
     callNow: "Call Now",
     sendSMS: "Send Text Message",
@@ -251,7 +245,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     location: "Location",
     locationCity: "Location / City",
     locationHelpText: "We use this to find local photographers for you.",
-    // Event Themes
     birthday: "Birthday",
     wedding: "Wedding",
     party: "Party",
@@ -262,17 +255,35 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     holiday: "Holiday",
     sports: "Sports",
     concert: "Concert",
+    
+    // NEW LANDING PAGE KEYS
+    step1Title: "Create Event",
+    step1Desc: "Set up your event in seconds. Choose a theme and privacy settings.",
+    step2Title: "Share QR Code",
+    step2Desc: "Guests scan the code to join. No app download required.",
+    step3Title: "Watch Live",
+    step3Desc: "Photos appear instantly on the Live Slideshow for everyone to see.",
+    featNoApp: "No App Needed",
+    featNoAppDesc: "Guests simply scan and snap. Frictionless participation.",
+    featLiveWall: "Live Slideshow",
+    featLiveWallDesc: "Project photos in real-time on big screens.",
+    featAI: "AI Magic",
+    featAIDesc: "Face detection helps guests find their photos instantly.",
+    featPrivacy: "Total Privacy",
+    featPrivacyDesc: "Secure your memories with PIN codes and admin controls.",
+    proTitle: "For Event Professionals",
+    proDesc: "Boost your photography business with instant delivery and branding.",
+    statPhotos: "Photos Shared",
+    statEvents: "Events Hosted",
   },
   mk: {
-    // ... existing translations ...
-    appSubtitle: "Платформа за споделување настани",
-    loginHost: "Веќе имате профил? Најавете се",
-    addMemory: "Додади спомен",
-    tapToUpload: "ДОПРИ ЗА ПРИКАЧУВАЊЕ",
+    // ... existing ...
     appName: "SnapifY",
-    heroTitlePrefix: "Забавувај се.",
-    heroTitleSuffix: "Сликај веднаш.",
-    heroDesc: "Креирајте заеднички албуми за родендени, свадби и забави за неколку секунди. Дозволете им на гостите да ја доловат магијата.",
+    appSubtitle: "Платформа за споделување настани",
+    heroTitlePrefix: "Секој агол.",
+    heroTitleSuffix: "Секој момент.",
+    heroDesc: "Модерна дигитална книга на гости. Соберете фотографии и видеа од секој гостин во реално време без да преземаат апликација.",
+    // ... Copy over existing MK keys ...
     getStarted: "Започни",
     adminDemo: "Админ демо",
     signIn: "Најави се",
@@ -288,7 +299,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     forProfessionals: "За професионалци",
     event: "настан",
     currentPlan: "Тековен план",
-    contactSales: "Надгради Ниво",
+    contactSales: "Контактирајте Продажба",
     startFree: "Започни бесплатно",
     myEvents: "Мои настани",
     manageEvents: "Управувајте со вашите забави и албуми",
@@ -491,12 +502,10 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     by: "од",
     close: "Затвори",
     findMeDevMode: "⚠️ Експериментална функција: Оваа опција е моментално во развој.",
-    // PWA Strings
     installApp: "Инсталирај Апликација",
     installAppDesc: "Инсталирај SnapifY за подобро искуство.",
     install: "Инсталирај",
     offlineMode: "Моментално сте офлајн",
-    // New Modal Strings
     chooseAccess: "Како сакате да се приклучите?",
     guestAccess: "Гостински пристап",
     continueAsGuest: "Продолжи како гостин",
@@ -504,8 +513,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Јавна галерија",
     memberLogin: "Најава / Регистрација",
     privateUploadsHistory: "Приватни слики и историја",
-    
-    // Mobile Contact Options
     mobileFriendly: "Оптимизирано за мобилни",
     callNow: "Повикај сега",
     sendSMS: "Испрати порака",
@@ -514,7 +521,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     location: "Локација",
     locationCity: "Локација / Град",
     locationHelpText: "Го користиме ова за да најдеме локални фотографи за вас.",
-    // Event Themes
     birthday: "Роденден",
     wedding: "Свадба",
     party: "Забава",
@@ -525,14 +531,38 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     holiday: "Празник",
     sports: "Спорт",
     concert: "Концерт",
+    loginHost: "Веќе имате профил? Најавете се",
+    addMemory: "Додади спомен",
+    tapToUpload: "ДОПРИ ЗА ПРИКАЧУВАЊЕ",
+
+    // NEW KEYS MK
+    step1Title: "Креирај Настан",
+    step1Desc: "Поставете го вашиот настан за неколку секунди. Изберете тема и поставки.",
+    step2Title: "Сподели QR код",
+    step2Desc: "Гостите го скенираат кодот за да се приклучат. Нема потреба од апликација.",
+    step3Title: "Гледај во живо",
+    step3Desc: "Фотографиите се појавуваат веднаш на слајдшоуто во живо.",
+    featNoApp: "Без Апликација",
+    featNoAppDesc: "Гостите едноставно скенираат и сликаат.",
+    featLiveWall: "Слајдшоу во Живо",
+    featLiveWallDesc: "Проектирајте фотографии во реално време на големи екрани.",
+    featAI: "AI Магија",
+    featAIDesc: "Детекцијата на лице им помага на гостите веднаш да ги најдат своите фотографии.",
+    featPrivacy: "Целосна Приватност",
+    featPrivacyDesc: "Заштитете ги вашите спомени со PIN кодови и админ контроли.",
+    proTitle: "За Професионалци",
+    proDesc: "Подобрете го вашиот бизнис со моментална испорака и брендирање.",
+    statPhotos: "Споделени Фотографии",
+    statEvents: "Организирани Настани",
   },
   tr: {
-    // ... existing translations ...
-    appSubtitle: "Etkinlik Paylaşım Platformu", // Added this
+    // ... existing ...
     appName: "SnapifY",
-    heroTitlePrefix: "Partile.",
-    heroTitleSuffix: "Anında Çek.",
-    heroDesc: "Doğum günleri, düğünler ve partiler için saniyeler içinde paylaşılan albümler oluşturun. Misafirlerinizin büyüyü yakalamasına izin verin.",
+    appSubtitle: "Etkinlik Paylaşım Platformu",
+    heroTitlePrefix: "Her Açı.",
+    heroTitleSuffix: "Her An.",
+    heroDesc: "Modern dijital ziyaretçi defteri. Uygulama indirmeden her misafirden gerçek zamanlı fotoğraf ve video toplayın.",
+    // ... Copy existing TR ...
     getStarted: "Başlayın",
     adminDemo: "Yönetici Demo",
     signIn: "Giriş Yap",
@@ -548,7 +578,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     forProfessionals: "Profesyoneller İçin",
     event: "etkinlik",
     currentPlan: "Mevcut Plan",
-    contactSales: "Seviye Yükselt",
+    contactSales: "Satış Ekibiyle İletişime Geç",
     startFree: "Ücretsiz Başla",
     myEvents: "Etkinliklerim",
     manageEvents: "Partilerinizi ve albümlerinizi yönetin",
@@ -750,17 +780,11 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     untitled: "Başlıksız",
     by: "tarafından",
     close: "Kapat",
-    // NEW
     findMeDevMode: "⚠️ Deneysel Özellik: Bu özellik şu anda geliştirme aşamasındadır.",
     installApp: "Uygulamayı Yükle",
     installAppDesc: "Daha iyi bir deneyim için SnapifY'ı yükleyin.",
     install: "Yükle",
     offlineMode: "Şu anda çevrimdışısınız",
-    // New UI Strings
-    addMemory: "Anı Ekle",
-    tapToUpload: "YÜKLEMEK İÇİN DOKUN",
-    loginHost: "Zaten hesabınız var mı? Giriş Yap",
-    // New Modal Strings
     chooseAccess: "Nasıl katılmak istersiniz?",
     guestAccess: "Misafir Girişi",
     continueAsGuest: "Misafir Olarak Devam Et",
@@ -768,8 +792,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Herkese Açık Galeri",
     memberLogin: "Giriş Yap / Kayıt Ol",
     privateUploadsHistory: "Özel yüklemeler ve etkinlik geçmişi",
-    
-    // Mobile Contact Options
     mobileFriendly: "Mobil Optimize",
     callNow: "Hemen Ara",
     sendSMS: "SMS Gönder",
@@ -778,7 +800,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     location: "Konum",
     locationCity: "Konum / Şehir",
     locationHelpText: "Bununla size yerel fotoğrafçılar buluyoruz.",
-    // Event Themes
     birthday: "Doğum Günü",
     wedding: "Düğün",
     party: "Parti",
@@ -789,17 +810,38 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     holiday: "Tatil",
     sports: "Spor",
     concert: "Konser",
+    loginHost: "Zaten hesabınız var mı? Giriş Yap",
+    addMemory: "Anı Ekle",
+    tapToUpload: "YÜKLEMEK İÇİN DOKUN",
+
+    // NEW KEYS TR
+    step1Title: "Etkinlik Oluştur",
+    step1Desc: "Saniyeler içinde etkinliğinizi kurun. Tema ve ayarları seçin.",
+    step2Title: "QR Paylaş",
+    step2Desc: "Misafirler katılmak için kodu tarar. Uygulama gerekmez.",
+    step3Title: "Canlı İzle",
+    step3Desc: "Fotoğraflar anında büyük ekranda slayt gösterisi olarak görünür.",
+    featNoApp: "Uygulama Yok",
+    featNoAppDesc: "Misafirler sadece tarar ve çeker. Kesintisiz katılım.",
+    featLiveWall: "Canlı Slayt Gösterisi",
+    featLiveWallDesc: "Fotoğrafları gerçek zamanlı olarak büyük ekranlara yansıtın.",
+    featAI: "AI Sihri",
+    featAIDesc: "Yüz algılama, misafirlerin fotoğraflarını anında bulmasına yardımcı olur.",
+    featPrivacy: "Tam Gizlilik",
+    featPrivacyDesc: "Anılarınızı PIN kodları ve yönetici kontrolleriyle koruyun.",
+    proTitle: "Profesyoneller İçin",
+    proDesc: "Anında teslimat ve markalama ile fotoğrafçılık işinizi büyütün.",
+    statPhotos: "Paylaşılan Fotoğraf",
+    statEvents: "Düzenlenen Etkinlik",
   },
   sq: {
-    // ... existing translations ...
-    appSubtitle: "Platformë për Ndarjen e Ngjarjeve", // Added this
-    loginHost: "Keni llogari? Hyni",
-    addMemory: "Shto Kujtime",
-    tapToUpload: "PREK PËR TË NGARKUAR",
+    // ... existing ...
     appName: "SnapifY",
-    heroTitlePrefix: "Festo Fort.",
-    heroTitleSuffix: "Shkrep Tani.",
-    heroDesc: "Krijoni albume të përbashkëta për ditëlindje, dasma dhe festa në sekonda. Lejoni mysafirët tuaj të kapin magjinë.",
+    appSubtitle: "Platformë për Ndarjen e Ngjarjeve",
+    heroTitlePrefix: "Çdo Kënd.",
+    heroTitleSuffix: "Çdo Moment.",
+    heroDesc: "Libri modern digjital i mysafirëve. Mblidhni foto dhe video nga çdo mysafir në kohë reale pa shkarkuar aplikacion.",
+    // ... Copy existing SQ ...
     getStarted: "Fillo Tani",
     adminDemo: "Demo Admin",
     signIn: "Hyni",
@@ -815,7 +857,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     forProfessionals: "Për Profesionistët",
     event: "ngjarje",
     currentPlan: "Plani Aktual",
-    contactSales: "Përmirëso Nivelin",
+    contactSales: "Kontakto Shitjet",
     startFree: "Fillo Falas",
     myEvents: "Ngjarjet e Mia",
     manageEvents: "Menaxho festat dhe albumet e tua",
@@ -1017,13 +1059,11 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     untitled: "Pa Titull",
     by: "nga",
     close: "Mbyll",
-    // NEW
     findMeDevMode: "⚠️ Veçori Eksperimentale: Kjo veçori është aktualisht në zhvillim.",
     installApp: "Instalo Aplikacionin",
     installAppDesc: "Instalo SnapifY për një përvojë më të mirë.",
     install: "Instalo",
     offlineMode: "Ju jeni aktualisht offline",
-    // New Modal Strings
     chooseAccess: "Si dëshironi të bashkoheni?",
     guestAccess: "Qasje si Mysafir",
     continueAsGuest: "Vazhdo si Mysafir",
@@ -1031,8 +1071,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     publicGallery: "Galeri Publike",
     memberLogin: "Hyni / Regjistrohuni",
     privateUploadsHistory: "Ngarkime private & historia e ngjarjeve",
-    
-    // Mobile Contact Options
     mobileFriendly: "Optimizuar për Mobile",
     callNow: "Thirr Tani",
     sendSMS: "Dërgo SMS",
@@ -1041,7 +1079,6 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     location: "Vendndodhja",
     locationCity: "Vendndodhja / Qyteti",
     locationHelpText: "E përdorim këtë për të gjetur fotografë lokalë për ju.",
-    // Event Themes
     birthday: "Ditëlindje",
     wedding: "Dasma",
     party: "Festë",
@@ -1052,6 +1089,29 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     holiday: "Pushime",
     sports: "Sport",
     concert: "Koncert",
+    loginHost: "Keni llogari? Hyni",
+    addMemory: "Shto Kujtime",
+    tapToUpload: "PREK PËR TË NGARKUAR",
+
+    // NEW KEYS SQ
+    step1Title: "Krijo Ngjarje",
+    step1Desc: "Konfiguroni ngjarjen në sekonda. Zgjidhni temën dhe cilësimet.",
+    step2Title: "Ndaj QR Kodin",
+    step2Desc: "Mysafirët skanojnë kodin për t'u bashkuar. Nuk kërkohet aplikacion.",
+    step3Title: "Shiko Live",
+    step3Desc: "Fotot shfaqen menjëherë në Slideshow.",
+    featNoApp: "Pa Aplikacion",
+    featNoAppDesc: "Mysafirët thjesht skanojnë dhe shkrepin.",
+    featLiveWall: "Slideshow Live",
+    featLiveWallDesc: "Projektoni fotot në kohë reale në ekrane të mëdha.",
+    featAI: "Magjia AI",
+    featAIDesc: "Detektimi i fytyrës i ndihmon mysafirët të gjejnë fotot e tyre menjëherë.",
+    featPrivacy: "Privatësi Totale",
+    featPrivacyDesc: "Siguroni kujtimet tuaja me PIN dhe kontrolle admini.",
+    proTitle: "Për Profesionistët",
+    proDesc: "Përmirësoni biznesin tuaj të fotografisë me shpërndarje të menjëhershme.",
+    statPhotos: "Foto të Ndara",
+    statEvents: "Ngjarje të Organizuara",
   }
 };
 
@@ -1103,7 +1163,6 @@ export const EVENT_THEMES = [
   { id: 'Concert', labelKey: 'concert', emoji: '🎵' }
 ];
 
-// Hero images for landing page
 export const HERO_IMAGES = [
   "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1920", 
   "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80&w=1920", 

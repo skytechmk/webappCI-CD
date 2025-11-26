@@ -241,9 +241,31 @@ db.serialize(async () => {
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS comments (
-        id TEXT PRIMARY KEY, mediaId TEXT, eventId TEXT, senderName TEXT, text TEXT, createdAt TEXT,
-        FOREIGN KEY(mediaId) REFERENCES media(id) ON DELETE CASCADE
-    )`);
+         id TEXT PRIMARY KEY, mediaId TEXT, eventId TEXT, senderName TEXT, text TEXT, createdAt TEXT,
+         FOREIGN KEY(mediaId) REFERENCES media(id) ON DELETE CASCADE
+     )`);
+
+    // Support chat system
+    db.run(`CREATE TABLE IF NOT EXISTS support_messages (
+         id TEXT PRIMARY KEY,
+         userId TEXT,
+         userName TEXT,
+         userEmail TEXT,
+         message TEXT,
+         isFromAdmin INTEGER DEFAULT 0,
+         isRead INTEGER DEFAULT 0,
+         createdAt TEXT,
+         FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+     )`);
+
+    // Push notification subscriptions
+    db.run(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+         id TEXT PRIMARY KEY,
+         userId TEXT,
+         subscription TEXT,
+         createdAt TEXT,
+         FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+     )`);
 });
 
 const storage = multer.diskStorage({
@@ -284,8 +306,35 @@ async function uploadToS3(filePath, key, contentType) {
     }
 }
 
+// Track admin online status
+const adminOnlineStatus = new Map();
+
 io.on('connection', (socket) => {
+    let currentUser = null;
+
+    socket.on('authenticate', (token) => {
+        try {
+            const user = jwt.verify(token, JWT_SECRET);
+            currentUser = user;
+
+            // Track admin status
+            if (user.role === 'ADMIN') {
+                adminOnlineStatus.set(user.id, { online: true, socketId: socket.id, lastSeen: Date.now() });
+                // Notify all users about admin status change
+                io.emit('admin_status_update', {
+                    adminId: user.id,
+                    online: true,
+                    lastSeen: Date.now()
+                });
+                console.log(`Admin ${user.name} (${user.id}) came online`);
+            }
+        } catch (e) {
+            console.error("Authentication failed:", e);
+        }
+    });
+
     socket.on('join_event', (eventId) => socket.join(eventId));
+
     socket.on('admin_trigger_reload', (token) => {
         try {
             const user = jwt.verify(token, JWT_SECRET);
@@ -293,6 +342,24 @@ io.on('connection', (socket) => {
                 io.emit('force_client_reload', { version: Date.now() });
             }
         } catch (e) { console.error("Unauthorized reload attempt"); }
+    });
+
+    socket.on('disconnect', () => {
+        if (currentUser && currentUser.role === 'ADMIN') {
+            // Mark admin as offline but keep record for some time
+            const adminData = adminOnlineStatus.get(currentUser.id);
+            if (adminData) {
+                adminData.online = false;
+                adminData.lastSeen = Date.now();
+                // Notify all users about admin going offline
+                io.emit('admin_status_update', {
+                    adminId: currentUser.id,
+                    online: false,
+                    lastSeen: Date.now()
+                });
+                console.log(`Admin ${currentUser.name} (${currentUser.id}) went offline`);
+            }
+        }
     });
 });
 
@@ -968,6 +1035,333 @@ Please review and process this upgrade request.
         requestId: requestId,
         message: 'Upgrade request submitted successfully. An administrator will contact you soon.'
     });
+});
+
+// --- ADMIN STATUS ---
+app.get('/api/admin/status', (req, res) => {
+    const adminStatus = Array.from(adminOnlineStatus.entries()).map(([adminId, status]) => ({
+        adminId,
+        online: status.online,
+        lastSeen: status.lastSeen
+    }));
+    res.json({ admins: adminStatus });
+});
+
+// --- SUPPORT CHAT ---
+app.get('/api/support/messages', authenticateToken, (req, res) => {
+    const { limit = 50, offset = 0 } = req.query;
+
+    let query, params;
+    if (req.user.role === 'ADMIN') {
+        // Admin sees all conversations
+        query = `SELECT * FROM support_messages ORDER BY createdAt DESC LIMIT ? OFFSET ?`;
+        params = [parseInt(limit), parseInt(offset)];
+    } else {
+        // Users see only their own messages
+        query = `SELECT * FROM support_messages WHERE userId = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?`;
+        params = [req.user.id, parseInt(limit), parseInt(offset)];
+    }
+
+    db.all(query, params, (err, messages) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(messages.reverse()); // Return in chronological order
+    });
+});
+
+app.post('/api/support/messages', optionalAuth, (req, res) => {
+    const { message } = req.body;
+    if (!message || message.trim().length === 0) return res.status(400).json({ error: "Message is required" });
+
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    let userId = null;
+    let userName = 'Anonymous User';
+    let userEmail = null;
+
+    if (req.user) {
+        userId = req.user.id;
+        userName = req.user.name;
+        userEmail = req.user.email;
+    }
+
+    // Check if any admin is online
+    const onlineAdmins = Array.from(adminOnlineStatus.values()).filter(admin => admin.online);
+
+    db.run(`INSERT INTO support_messages (id, userId, userName, userEmail, message, isFromAdmin, createdAt)
+            VALUES (?, ?, ?, ?, ?, 0, ?)`,
+        [id, userId, userName, userEmail, message.trim(), createdAt], async (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        const newMessage = {
+            id,
+            userId,
+            userName,
+            userEmail,
+            message: message.trim(),
+            isFromAdmin: false,
+            isRead: false,
+            createdAt
+        };
+
+        // Emit to all admin users
+        io.emit('new_support_message', newMessage);
+
+        // Send push notifications to offline admins
+        if (onlineAdmins.length === 0) {
+          try {
+            // Send push notification to all admin users
+            const adminUsers = await new Promise((resolve) => {
+              db.all("SELECT id FROM users WHERE role = 'ADMIN'", [], (err, rows) => {
+                resolve(rows || []);
+              });
+            });
+
+            for (const admin of adminUsers) {
+              await sendPushNotification(admin.id, 'New Support Message',
+                `${userName}: ${message.slice(0, 100)}${message.length > 100 ? '...' : ''}`,
+                { type: 'support_message', userId: userId, messageId: id });
+            }
+          } catch (pushError) {
+            console.error('Failed to send push notifications:', pushError);
+          }
+        }
+
+        // If no admin is online, send automated response
+        if (onlineAdmins.length === 0) {
+            setTimeout(() => {
+                const autoResponseId = crypto.randomUUID();
+                const autoResponse = {
+                    id: autoResponseId,
+                    userId: userId,
+                    userName: 'SnapifY Support',
+                    userEmail: null,
+                    message: "Thank you for your message! Our administrator is currently offline but will respond as soon as possible. For urgent matters, please email support@snapify.mk",
+                    isFromAdmin: true,
+                    isRead: false,
+                    createdAt: new Date().toISOString()
+                };
+
+                db.run(`INSERT INTO support_messages (id, userId, userName, userEmail, message, isFromAdmin, createdAt)
+                        VALUES (?, ?, ?, ?, ?, 1, ?)`,
+                    [autoResponseId, userId, 'SnapifY Support', null, autoResponse.message, autoResponse.createdAt], (err) => {
+                    if (!err) {
+                        io.emit('new_support_message', autoResponse);
+                    }
+                });
+            }, 2000); // 2 second delay for automated response
+        }
+
+        res.json(newMessage);
+    });
+});
+
+app.post('/api/support/admin-reply', authenticateToken, (req, res) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: "Unauthorized" });
+
+    const { userId, message } = req.body;
+    if (!userId || !message || message.trim().length === 0) {
+        return res.status(400).json({ error: "User ID and message are required" });
+    }
+
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+
+    db.run(`INSERT INTO support_messages (id, userId, userName, userEmail, message, isFromAdmin, isRead, createdAt)
+            VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
+        [id, userId, req.user.name, req.user.email, message.trim(), createdAt], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        const replyMessage = {
+            id,
+            userId,
+            userName: req.user.name,
+            userEmail: req.user.email,
+            message: message.trim(),
+            isFromAdmin: true,
+            isRead: true,
+            createdAt
+        };
+
+        // Emit to the specific user and all admins
+        io.emit('new_support_message', replyMessage);
+
+        res.json(replyMessage);
+    });
+});
+
+app.put('/api/support/messages/:id/read', authenticateToken, (req, res) => {
+    const messageId = req.params.id;
+
+    // Get message to check ownership
+    db.get("SELECT userId, isFromAdmin FROM support_messages WHERE id = ?", [messageId], (err, message) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!message) return res.status(404).json({ error: "Message not found" });
+
+        // Allow admin to mark any message as read, users can only mark their own admin messages
+        const canMarkRead = req.user.role === 'ADMIN' ||
+                           (message.userId === req.user.id && message.isFromAdmin);
+
+        if (!canMarkRead) return res.status(403).json({ error: "Unauthorized" });
+
+        db.run("UPDATE support_messages SET isRead = 1 WHERE id = ?", [messageId], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true });
+        });
+    });
+});
+
+// --- PUSH NOTIFICATIONS ---
+app.post('/api/push/subscribe', authenticateToken, (req, res) => {
+    const { subscription } = req.body;
+    if (!subscription) return res.status(400).json({ error: "Subscription is required" });
+
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+
+    // Remove any existing subscription for this user
+    db.run("DELETE FROM push_subscriptions WHERE userId = ?", [req.user.id], () => {
+        db.run(`INSERT INTO push_subscriptions (id, userId, subscription, createdAt)
+                VALUES (?, ?, ?, ?)`,
+            [id, req.user.id, JSON.stringify(subscription), createdAt], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true });
+        });
+    });
+});
+
+// Function to send push notification
+async function sendPushNotification(userId, title, body, data = {}) {
+    try {
+        const subscriptions = await new Promise((resolve) => {
+            db.all("SELECT subscription FROM push_subscriptions WHERE userId = ?", [userId], (err, rows) => {
+                resolve(rows || []);
+            });
+        });
+
+        const notifications = subscriptions.map(sub => {
+            const subscription = JSON.parse(sub.subscription);
+            return webpush.sendNotification(subscription, JSON.stringify({
+                title,
+                body,
+                icon: '/pwa-192x192.png',
+                badge: '/pwa-192x192.png',
+                data
+            }));
+        });
+
+        await Promise.allSettled(notifications);
+        console.log(`Push notification sent to ${subscriptions.length} devices for user ${userId}`);
+    } catch (error) {
+        console.error('Push notification failed:', error);
+    }
+}
+
+// Configure web push
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+        'mailto:' + ADMIN_EMAIL,
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+    );
+} else {
+    console.warn('VAPID keys not configured, push notifications disabled');
+}
+
+// --- AI ROUTES ---
+app.post('/api/ai/generate-caption', optionalAuth, async (req, res) => {
+    const { base64Image } = req.body;
+    if (!base64Image) return res.status(400).json({ error: "Image required" });
+
+    try {
+        const genAI = new GoogleGenAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+        const prompt = "Generate a short, engaging caption for this photo from an event. Keep it under 50 characters.";
+        const result = await model.generateContent([prompt, { inlineData: { mimeType: "image/jpeg", data: base64Image } }]);
+        const caption = result.response.text().trim();
+
+        res.json({ caption });
+    } catch (error) {
+        console.error("AI Caption Error:", error);
+        res.status(500).json({ error: "Failed to generate caption" });
+    }
+});
+
+app.post('/api/ai/generate-event-description', optionalAuth, async (req, res) => {
+    const { title, date, type } = req.body;
+    if (!title || !date || !type) return res.status(400).json({ error: "Title, date, and type required" });
+
+    try {
+        const genAI = new GoogleGenAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+        const prompt = `Generate a short, engaging event description for: ${title} on ${date}, type: ${type}. Keep it under 100 characters.`;
+        const result = await model.generateContent(prompt);
+        const description = result.response.text().trim();
+
+        res.json({ description });
+    } catch (error) {
+        console.error("AI Description Error:", error);
+        res.status(500).json({ error: "Failed to generate description" });
+    }
+});
+
+app.post('/api/ai/generate-guest-reviews', optionalAuth, async (req, res) => {
+    const { country, language, count = 6 } = req.body;
+    if (!country || !language) return res.status(400).json({ error: "Country and language required" });
+
+    try {
+        const genAI = new GoogleGenAI(process.env.GOOGLE_AI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+        const prompt = `Generate ${count} diverse, authentic guest feedback reviews for a web app called Snapify, an event-sharing platform. The reviews should be from users in ${country}, written in ${language}, and reflect local cultural contexts, experiences, and perspectives.
+
+Requirements:
+- Mix of positive, neutral, and constructive criticism tones
+- Varied lengths (short to medium)
+- Include subtle references to local customs, cuisine, traditions, or events relevant to ${country}
+- Use colloquial language and varied formality levels
+- Make them feel genuine and realistic
+- Each review should be in ${language}
+
+Return the reviews as a JSON array of objects, each with:
+- "review": the review text in ${language}
+- "translation": English translation if not English
+- "tone": "positive", "neutral", or "constructive"
+- "rationale": brief explanation of realism
+
+Example structure:
+[
+  {
+    "review": "Review text here",
+    "translation": "English translation",
+    "tone": "positive",
+    "rationale": "Reflects local culture..."
+  }
+]`;
+
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.text().trim();
+
+        // Try to parse the JSON response
+        let reviews;
+        try {
+            reviews = JSON.parse(responseText);
+        } catch (parseError) {
+            // If parsing fails, try to extract JSON from the response
+            const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+                reviews = JSON.parse(jsonMatch[0]);
+            } else {
+                throw new Error("Invalid JSON response from AI");
+            }
+        }
+
+        res.json({ reviews });
+    } catch (error) {
+        console.error("AI Reviews Error:", error);
+        res.status(500).json({ error: "Failed to generate reviews" });
+    }
 });
 
 server.listen(PORT, () => {

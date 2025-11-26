@@ -21,6 +21,7 @@ import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 import { OfflineBanner } from './components/OfflineBanner';
 import { ShareTargetHandler } from './components/ShareTargetHandler';
 import { ReloadPrompt } from './components/ReloadPrompt';
+import { SupportChat } from './components/SupportChat';
 import { applyWatermark } from './utils/imageProcessing';
 import { clearDeviceFingerprint } from './utils/deviceFingerprint';
 import { socketService } from './services/socketService';
@@ -54,6 +55,7 @@ const safeRemoveItem = (key: string) => {
 declare global {
     interface Window {
         google: any;
+        googleSignInInitialized?: boolean;
     }
 }
 
@@ -84,6 +86,9 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
+  const [adminStatus, setAdminStatus] = useState<{adminId: string, online: boolean, lastSeen: number}[]>([]);
+  const [showSupportChat, setShowSupportChat] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -94,27 +99,82 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
-      socketService.connect();
+      // Only connect socket when page becomes visible (important for mobile)
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          const token = localStorage.getItem('snapify_token');
+          socketService.connect(token || undefined);
+        }
+      };
+
+      // Connect initially if page is visible
+      if (!document.hidden) {
+        const token = localStorage.getItem('snapify_token');
+        socketService.connect(token || undefined);
+      }
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      let lastReloadTime = 0;
       const handleForceReload = async () => {
+          const now = Date.now();
+          // Prevent reloads more frequent than once per 30 seconds
+          if (now - lastReloadTime < 30000) {
+              console.log('Ignoring rapid reload request');
+              return;
+          }
+          lastReloadTime = now;
+
           if ('serviceWorker' in navigator) {
               const registrations = await navigator.serviceWorker.getRegistrations();
               for (const registration of registrations) {
                   await registration.unregister();
               }
-          }
-          if ('caches' in window) {
-              const cacheNames = await caches.keys();
-              cacheNames.forEach(cacheName => caches.delete(cacheName));
-          }
-          window.location.reload();
-      };
-      socketService.on('force_client_reload', handleForceReload);
-      return () => { socketService.off('force_client_reload', handleForceReload); };
-  }, []);
+           }
+           if ('caches' in window) {
+               const cacheNames = await caches.keys();
+               cacheNames.forEach(cacheName => caches.delete(cacheName));
+           }
+           window.location.reload();
+       };
+       socketService.on('force_client_reload', handleForceReload);
+
+       // Admin status tracking
+       const handleAdminStatusUpdate = (update: {adminId: string, online: boolean, lastSeen: number}) => {
+         setAdminStatus(prev => {
+           const existing = prev.find(a => a.adminId === update.adminId);
+           if (existing) {
+             return prev.map(a => a.adminId === update.adminId ? update : a);
+           } else {
+             return [...prev, update];
+           }
+         });
+       };
+
+       socketService.on('admin_status_update', handleAdminStatusUpdate);
+
+       // Load initial admin status
+       const loadAdminStatus = async () => {
+         try {
+           const response = await fetch(`${API_URL}/api/admin/status`);
+           const data = await response.json();
+           setAdminStatus(data.admins || []);
+         } catch (error) {
+           console.warn('Failed to load admin status:', error);
+         }
+       };
+
+       loadAdminStatus();
+
+       return () => {
+         document.removeEventListener('visibilitychange', handleVisibilityChange);
+         socketService.off('force_client_reload', handleForceReload);
+         socketService.off('admin_status_update', handleAdminStatusUpdate);
+       };
+   }, []);
 
   useEffect(() => {
     if (currentUser?.id) {
-        socketService.connect();
         const handleUserUpdate = (updatedUser: User) => {
             if (updatedUser.id === currentUser.id) {
                 setCurrentUser(prev => {
@@ -134,6 +194,7 @@ export default function App() {
           const token = localStorage.getItem('snapify_token');
           const storedUserId = localStorage.getItem('snapify_user_id');
           let currentUserFromStorage: User | null = null;
+          let hasValidAuth = false;
 
           if (token && storedUserId) {
               try {
@@ -141,17 +202,24 @@ export default function App() {
                   if (savedUserStr) {
                       currentUserFromStorage = JSON.parse(savedUserStr);
                       setCurrentUser(currentUserFromStorage);
+                      hasValidAuth = true;
                   }
-                  const eventsData = await api.fetchEvents();
-                  setEvents(eventsData);
 
-                  if (currentUserFromStorage?.role === UserRole.ADMIN) {
-                      const usersData = await api.fetchUsers();
-                      setAllUsers(usersData);
+                  // Only fetch data if we have valid auth
+                  if (hasValidAuth) {
+                      const eventsData = await api.fetchEvents();
+                      setEvents(eventsData);
+
+                      if (currentUserFromStorage?.role === UserRole.ADMIN) {
+                          const usersData = await api.fetchUsers();
+                          setAllUsers(usersData);
+                      }
                   }
               } catch (e) {
+                  console.warn('Auth validation failed, logging out:', e);
                   handleLogout();
                   currentUserFromStorage = null;
+                  hasValidAuth = false;
               }
           }
 
@@ -168,20 +236,23 @@ export default function App() {
                        setCurrentEventId(sharedEventId);
                        setView('event');
                        incrementEventViews(sharedEventId, [sharedEvent]);
+                       return; // Exit early, view is set
                    }
                } catch (error) {
-                   if (currentUserFromStorage) {
-                       setView(currentUserFromStorage.role === UserRole.ADMIN ? 'admin' : 'dashboard');
-                   }
+                   console.warn('Failed to load shared event:', error);
+                   // Fall through to normal view logic
                }
+          }
+
+          // Set appropriate view based on auth status
+          if (hasValidAuth && currentUserFromStorage) {
+              setView(currentUserFromStorage.role === UserRole.ADMIN ? 'admin' : 'dashboard');
           } else {
-              if (currentUserFromStorage) {
-                  setView(currentUserFromStorage.role === UserRole.ADMIN ? 'admin' : 'dashboard');
-              } else {
-                  setView('landing');
-              }
+              setView('landing');
           }
       } catch (err) {
+          console.error('Error in loadInitialData:', err);
+          // On error, default to landing but don't logout unnecessarily
           setView('landing');
       }
   };
@@ -189,21 +260,27 @@ export default function App() {
   useEffect(() => {
     loadInitialData();
     const initGoogle = () => {
-        if (window.google && env.VITE_GOOGLE_CLIENT_ID) {
+        if (window.google && env.VITE_GOOGLE_CLIENT_ID && !window.googleSignInInitialized) {
             try {
                 window.google.accounts.id.initialize({
                     client_id: env.VITE_GOOGLE_CLIENT_ID,
                     callback: handleGoogleResponse
                 });
-            } catch (e) {}
+                window.googleSignInInitialized = true;
+            } catch (e) {
+                console.warn('Google Sign-In initialization failed:', e);
+            }
         }
     };
     if (window.google) initGoogle();
     else {
         const interval = setInterval(() => {
-            if (window.google) { initGoogle(); clearInterval(interval); }
-        }, 200);
-        setTimeout(() => clearInterval(interval), 10000);
+            if (window.google) {
+                initGoogle();
+                clearInterval(interval);
+            }
+        }, 500); // Increased interval to reduce polling frequency
+        setTimeout(() => clearInterval(interval), 15000); // Increased timeout
     }
   }, []);
 
@@ -640,25 +717,51 @@ export default function App() {
 
       {view !== 'landing' && (
         <div className="flex-shrink-0 z-50 w-full bg-slate-50/95 backdrop-blur-md border-b border-slate-200">
-             <Navigation
-                currentUser={currentUser}
-                guestName={guestName}
-                view={view}
-                currentEventTitle={activeEvent?.title}
-                language={language}
-                onChangeLanguage={changeLanguage}
-                onLogout={handleLogout}
-                onSignIn={handleSignInRequest}
-                onHome={() => {
-                  setCurrentEventId(null);
-                  if (currentUser) setView(currentUser.role === UserRole.ADMIN ? 'admin' : 'dashboard');
-                  else setView('landing');
-                }}
-                onBack={handleBack}
-                onToAdmin={() => setView('admin')}
-                onOpenSettings={() => setShowStudioSettings(true)}
-                t={t}
-             />
+              <Navigation
+                 currentUser={currentUser}
+                 guestName={guestName}
+                 view={view}
+                 currentEventTitle={activeEvent?.title}
+                 language={language}
+                 onChangeLanguage={changeLanguage}
+                 onLogout={handleLogout}
+                 onSignIn={handleSignInRequest}
+                 onHome={() => {
+                   setCurrentEventId(null);
+                   if (currentUser) setView(currentUser.role === UserRole.ADMIN ? 'admin' : 'dashboard');
+                   else setView('landing');
+                 }}
+                 onBack={handleBack}
+                 onToAdmin={() => setView('admin')}
+                 onOpenSettings={() => setShowStudioSettings(true)}
+                 t={t}
+              />
+
+              {/* Admin Status & Support Chat */}
+              <div className="absolute top-4 right-4 flex items-center gap-3 z-60">
+                {/* Admin Status Indicator */}
+                {adminStatus.length > 0 && (
+                  <div className="flex items-center gap-2 bg-white/90 backdrop-blur rounded-full px-3 py-1.5 shadow-sm border border-slate-200">
+                    <div className="flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded-full ${adminStatus.some(a => a.online) ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                      <span className="text-xs font-medium text-slate-700">
+                        {adminStatus.some(a => a.online) ? 'Admin Online' : 'Admin Offline'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Support Chat Button */}
+                <button
+                  onClick={() => setShowSupportChat(true)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full p-2.5 shadow-lg hover:shadow-xl transition-all"
+                  title="Contact Support"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                </button>
+              </div>
         </div>
       )}
 
@@ -776,6 +879,7 @@ export default function App() {
       {showGuestLogin && <GuestLoginModal onLogin={handleGuestLogin} onRegister={handleSignInRequest} onCancel={() => setShowGuestLogin(false)} t={t} />}
       {showCreateModal && currentUser && <CreateEventModal currentUser={currentUser} onClose={() => setShowCreateModal(false)} onCreate={handleCreateEvent} t={t} />}
       {showStudioSettings && currentUser && <StudioSettingsModal currentUser={currentUser} onClose={() => setShowStudioSettings(false)} onSave={handleUpdateStudioSettings} t={t} />}
+      <SupportChat isOpen={showSupportChat} onClose={() => setShowSupportChat(false)} currentUser={currentUser} t={t} />
     </div>
   );
 }

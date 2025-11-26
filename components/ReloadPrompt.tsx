@@ -12,16 +12,20 @@ export const ReloadPrompt: React.FC = () => {
     updateServiceWorker,
   } = useRegisterSW({
     onRegistered(r: any) {
-      // Check for updates frequently in both dev and prod
+      // Check for updates less frequently to prevent iOS issues
       if (r) {
-        const interval = 5 * 1000; // 5 seconds in both dev and prod
+        const interval = isDev ? 30 * 1000 : 5 * 60 * 1000; // 30s in dev, 5min in prod
         setInterval(() => {
-          r.update();
+          // Only check when page is visible to prevent iOS background issues
+          if (!document.hidden) {
+            r.update();
+          }
         }, interval);
       }
     },
     onRegisterError(error: any) {
       // SW registration error logged for debugging
+      console.warn('Service Worker registration error:', error);
     },
   });
 

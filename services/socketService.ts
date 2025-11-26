@@ -5,13 +5,44 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 class SocketService {
     socket: Socket | null = null;
 
-    connect() {
-        if (this.socket) return;
-        this.socket = io(API_URL);
-        
-        this.socket.on('connect', () => {
-            console.log('Connected to Socket.io server at', API_URL);
-        });
+    connect(userToken?: string) {
+      if (this.socket && this.socket.connected) return;
+  
+      // Disconnect existing socket if it's in a bad state
+      if (this.socket && !this.socket.connected) {
+        this.socket.disconnect();
+        this.socket = null;
+      }
+  
+      this.socket = io(API_URL, {
+        // More conservative settings for mobile/iOS
+        transports: ['websocket', 'polling'],
+        timeout: 20000,
+        forceNew: false,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+      });
+  
+      this.socket.on('connect', () => {
+        console.log('Connected to Socket.io server at', API_URL);
+        // Authenticate if we have a token
+        if (userToken) {
+          this.socket?.emit('authenticate', userToken);
+        }
+      });
+  
+      this.socket.on('disconnect', (reason) => {
+        console.log('Socket disconnected:', reason);
+        // Don't auto-reconnect on mobile if user navigated away
+        if (reason === 'io client disconnect' || document.hidden) {
+          this.socket = null;
+        }
+      });
+  
+      this.socket.on('connect_error', (error) => {
+        console.warn('Socket connection error:', error);
+      });
     }
 
     joinEvent(eventId: string) {

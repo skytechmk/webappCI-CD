@@ -180,6 +180,42 @@ export const api = {
         return data.description || "Join us for an amazing celebration!";
     },
 
+    generateGuestReviews: async (country: string, language: string, count: number = 6): Promise<any[]> => {
+        const prompt = `Generate ${count} diverse, authentic guest feedback reviews for a web app called Snapify, an event-sharing platform. The reviews should be from users in ${country}, written in ${language}, and reflect local cultural contexts, experiences, and perspectives.
+
+Requirements:
+- Mix of positive, neutral, and constructive criticism tones
+- Varied lengths (short to medium)
+- Include subtle references to local customs, cuisine, traditions, or events relevant to ${country}
+- Use colloquial language and varied formality levels
+- Make them feel genuine and realistic
+- Each review should be in ${language}
+
+Return the reviews as a JSON array of objects, each with:
+- "review": the review text in ${language}
+- "translation": English translation if not English
+- "tone": "positive", "neutral", or "constructive"
+- "rationale": brief explanation of realism
+
+Example structure:
+[
+  {
+    "review": "Review text here",
+    "translation": "English translation",
+    "tone": "positive",
+    "rationale": "Reflects local culture..."
+  }
+]`;
+
+        const res = await fetch(`${API_URL}/api/ai/generate-guest-reviews`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ prompt, country, language, count })
+        });
+        const data = await res.json();
+        return data.reviews || [];
+    },
+
     likeMedia: async (id: string): Promise<void> => { await fetch(`${API_URL}/api/media/${id}/like`, { method: 'PUT' }); },
     deleteMedia: async (id: string): Promise<void> => { await fetch(`${API_URL}/api/media/${id}`, { method: 'DELETE', headers: { ...getAuthHeaders() } }); },
     
@@ -228,5 +264,29 @@ export const api = {
         const res = await fetch(`${API_URL}/api/system/storage`, { headers: { ...getAuthHeaders() } });
         if (!res.ok) throw new Error("Failed to get storage info");
         return res.json();
+    },
+
+    // --- SUPPORT CHAT ---
+    getSupportMessages: async (): Promise<any[]> => {
+        const res = await fetch(`${API_URL}/api/support/messages`, { headers: { ...getAuthHeaders() } });
+        if (!res.ok) throw new Error("Failed to get support messages");
+        return res.json();
+    },
+
+    sendAdminReply: async (userId: string, message: string): Promise<void> => {
+        const res = await fetch(`${API_URL}/api/support/admin-reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ userId, message })
+        });
+        if (!res.ok) throw new Error("Failed to send reply");
+    },
+
+    markMessageAsRead: async (messageId: string): Promise<void> => {
+        const res = await fetch(`${API_URL}/api/support/messages/${messageId}/read`, {
+            method: 'PUT',
+            headers: { ...getAuthHeaders() }
+        });
+        if (!res.ok) throw new Error("Failed to mark message as read");
     }
 };
