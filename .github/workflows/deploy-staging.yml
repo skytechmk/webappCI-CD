@@ -68,7 +68,7 @@ jobs:
 
           # Install dependencies
           echo "📦 Installing dependencies..."
-          npm ci --production
+          npm ci --production --legacy-peer-deps
 
           # Create logs directory
           echo "📝 Setting up logging..."
