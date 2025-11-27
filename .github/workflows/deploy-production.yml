@@ -54,69 +54,111 @@ jobs:
         username: ${{ secrets.PRODUCTION_USER }}
         key: ${{ secrets.PRODUCTION_SSH_KEY }}
         script: |
+          # SnapifY Production Deployment for skytech.mk server
           cd /var/www/snapify
 
-          # Create timestamped backup
-          BACKUP_DIR="backup-$(date +%Y%m%d_%H%M%S)"
-          mkdir -p "$BACKUP_DIR"
+          echo "🚀 Starting production deployment of SnapifY version ${{ github.sha }}"
+
+          # Create timestamped backup in /var/www/backups
+          BACKUP_DIR="/var/www/backups/snapify_prod_backup_$(date +%Y%m%d_%H%M%S)"
+          mkdir -p /var/www/backups
+
+          echo "📦 Creating backup..."
           if [ -d "dist" ]; then cp -r dist "$BACKUP_DIR/"; fi
           if [ -d "server" ]; then cp -r server "$BACKUP_DIR/"; fi
           if [ -f "package.json" ]; then cp package.json "$BACKUP_DIR/"; fi
-
-          echo "📦 Deploying SnapifY version ${{ github.sha }}"
+          if [ -f "ecosystem.config.cjs" ]; then cp ecosystem.config.cjs "$BACKUP_DIR/"; fi
+          if [ -f "snapify.db" ]; then cp snapify.db "$BACKUP_DIR/"; fi
+          if [ -f ".env" ]; then cp .env "$BACKUP_DIR/"; fi
 
           # Extract new deployment
+          echo "📦 Extracting new deployment..."
           tar -xzf snapify-prod-${{ github.sha }}.tar.gz
 
           # Install dependencies
+          echo "📦 Installing dependencies..."
           npm ci --production
 
-          # Run database migrations if needed
+          # Create logs directory
+          echo "📝 Setting up logging..."
+          mkdir -p logs
+
+          # Run database migrations if needed (uncomment when you have migrations)
+          # echo "🗄️ Running database migrations..."
           # npm run migrate
 
-          # Restart application with zero-downtime
-          pm2 reload ecosystem.config.js --env production
+          # Stop existing PM2 process gracefully
+          echo "🛑 Stopping existing application..."
+          pm2 stop snapify 2>/dev/null || true
+          pm2 delete snapify 2>/dev/null || true
+
+          # Start application with PM2
+          echo "▶️ Starting application..."
+          pm2 start ecosystem.config.cjs --env production
+
+          # Save PM2 configuration
+          pm2 save
 
           # Wait for application to start
-          sleep 15
+          echo "⏳ Waiting for application to start..."
+          sleep 20
 
           # Health check with retries
-          for i in {1..3}; do
-            if curl -f --max-time 10 http://localhost:3001/api/health; then
-              echo "✅ Production deployment successful"
+          echo "🔍 Running health checks..."
+          HEALTH_CHECK_URL="http://localhost:3001/api/health"
+          MAX_RETRIES=3
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Health check attempt $i/$MAX_RETRIES..."
+            if curl -f --max-time 15 "$HEALTH_CHECK_URL"; then
+              echo "✅ Production deployment successful!"
+              echo "🌐 Application running at: https://snapify.skytech.mk"
               break
             else
-              echo "⚠️ Health check attempt $i failed, retrying..."
-              sleep 5
+              echo "⚠️ Health check attempt $i failed"
+              if [ $i -eq $MAX_RETRIES ]; then
+                echo "❌ All health checks failed - initiating rollback"
+
+                # Rollback logic
+                if [ -d "$BACKUP_DIR" ]; then
+                  echo "🔄 Rolling back to previous version..."
+                  rm -rf dist server package.json ecosystem.config.cjs 2>/dev/null || true
+                  cp -r "$BACKUP_DIR"/* ./
+
+                  # Restart with backup version
+                  pm2 stop snapify 2>/dev/null || true
+                  pm2 delete snapify 2>/dev/null || true
+                  pm2 start ecosystem.config.cjs --env production
+                  pm2 save
+
+                  sleep 15
+
+                  if curl -f --max-time 15 "$HEALTH_CHECK_URL"; then
+                    echo "✅ Rollback successful - backup version is running"
+                    exit 1  # Exit with error to indicate deployment failure
+                  fi
+                fi
+
+                echo "💥 Rollback failed - manual intervention required"
+                echo "Check PM2 logs: pm2 logs snapify"
+                echo "Backup location: $BACKUP_DIR"
+                exit 1
+              fi
+              sleep 10
             fi
           done
 
-          # Final health check
-          if ! curl -f --max-time 10 http://localhost:3001/api/health; then
-            echo "❌ Production deployment failed - rolling back"
-
-            # Rollback logic
-            if [ -d "$BACKUP_DIR" ]; then
-              echo "🔄 Rolling back to previous version"
-              rm -rf dist server package.json
-              cp -r "$BACKUP_DIR"/* ./
-              pm2 reload ecosystem.config.js --env production
-              sleep 10
-
-              if curl -f http://localhost:3001/api/health; then
-                echo "✅ Rollback successful"
-                exit 1  # Exit with error to indicate deployment failure
-              fi
-            fi
-
-            echo "💥 Rollback failed - manual intervention required"
-            exit 1
-          fi
-
           # Clean up old backups (keep last 5)
-          ls -d backup-* 2>/dev/null | sort | head -n -5 | xargs rm -rf || true
+          echo "🧹 Cleaning up old backups..."
+          ls -t /var/www/backups/snapify_prod_backup_* 2>/dev/null | tail -n +6 | xargs rm -rf || true
 
-          echo "🎉 Production deployment completed successfully"
+          # Reload nginx to pick up any changes
+          echo "🔄 Reloading nginx..."
+          sudo systemctl reload nginx || echo "Warning: nginx reload failed"
+
+          echo "🎉 Production deployment completed successfully!"
+          echo "📊 Application Status:"
+          pm2 jlist | jq -r '.[] | select(.name=="snapify") | "Name: \(.name), Status: \(.pm2_env.status), CPU: \(.monit.cpu)%, Memory: \(.monit.memory)MB"'
 
     - name: Notify deployment success
       uses: 8398a7/action-slack@v3

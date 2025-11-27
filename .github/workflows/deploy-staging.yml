@@ -47,33 +47,62 @@ jobs:
         username: ${{ secrets.STAGING_USER }}
         key: ${{ secrets.STAGING_SSH_KEY }}
         script: |
+          # SnapifY Staging Deployment for skytech.mk server
           cd /var/www/snapify-staging
 
+          echo "🚀 Starting staging deployment..."
+
+          # Create backup directory if it doesn't exist
+          mkdir -p /var/www/backups
+
           # Backup current deployment
+          TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
           if [ -d "dist" ]; then
-            mv dist backup-$(date +%Y%m%d_%H%M%S)
+            echo "📦 Creating backup..."
+            tar -czf "/var/www/backups/snapify_staging_backup_$TIMESTAMP.tar.gz" dist/ server/ package*.json ecosystem.config.cjs .env snapify.db 2>/dev/null || true
           fi
 
           # Extract new deployment
+          echo "📦 Extracting new deployment..."
           tar -xzf snapify-staging-${{ github.sha }}.tar.gz
 
           # Install dependencies
+          echo "📦 Installing dependencies..."
           npm ci --production
 
-          # Restart application
-          pm2 restart snapify-staging || pm2 start ecosystem.config.js --env staging
+          # Create logs directory
+          echo "📝 Setting up logging..."
+          mkdir -p logs
+
+          # Stop existing PM2 process
+          echo "🛑 Stopping existing application..."
+          pm2 stop snapify-staging 2>/dev/null || true
+          pm2 delete snapify-staging 2>/dev/null || true
+
+          # Start application with PM2
+          echo "▶️ Starting application..."
+          pm2 start ecosystem.config.cjs --name snapify-staging --env staging
+
+          # Save PM2 configuration
+          pm2 save
 
           # Wait for application to start
-          sleep 10
+          echo "⏳ Waiting for application to start..."
+          sleep 15
 
           # Health check
-          if curl -f http://localhost:3002/api/health; then
-            echo "✅ Staging deployment successful"
+          echo "🔍 Running health check..."
+          if curl -f --max-time 30 http://localhost:3002/api/health; then
+            echo "✅ Staging deployment successful!"
+            echo "🌐 Application running at: http://localhost:3002"
 
             # Clean up old backups (keep last 3)
-            ls -d backup-* 2>/dev/null | head -n -3 | xargs rm -rf || true
+            ls -t /var/www/backups/snapify_staging_backup_*.tar.gz 2>/dev/null | tail -n +4 | xargs rm -f || true
+
+            echo "🧹 Cleanup completed"
           else
-            echo "❌ Health check failed"
+            echo "❌ Health check failed - checking logs..."
+            pm2 logs snapify-staging --lines 20
             exit 1
           fi
 
