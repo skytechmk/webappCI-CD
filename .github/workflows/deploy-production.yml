@@ -45,7 +45,7 @@ jobs:
         cp -r dist deploy/
         cp -r server deploy/
         cp package.json deploy/
-        cp ecosystem.config.js deploy/
+        cp ecosystem.config.cjs deploy/
         cp nginx.conf deploy/
         cd deploy && tar -czf ../snapify-prod-${{ github.sha }}.tar.gz .
 
