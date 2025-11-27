@@ -80,6 +80,7 @@ jobs:
 
         # Extract new deployment
         echo "📦 Extracting new deployment..."
+        cp ~/work/webappCI-CD/snapify-prod-${{ github.sha }}.tar.gz ./
         tar -xzf snapify-prod-${{ github.sha }}.tar.gz
 
         # Install dependencies
