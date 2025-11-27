@@ -105,12 +105,3 @@ jobs:
             pm2 logs snapify-staging --lines 20
             exit 1
           fi
-
-    - name: Notify deployment status
-      uses: 8398a7/action-slack@v3
-      if: always()
-      with:
-        status: ${{ job.status }}
-        text: "SnapifY staging deployment ${{ job.status == 'success' && 'successful ✅' || 'failed ❌' }}"
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

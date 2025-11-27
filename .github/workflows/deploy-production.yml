@@ -159,21 +159,3 @@ jobs:
           echo "🎉 Production deployment completed successfully!"
           echo "📊 Application Status:"
           pm2 jlist | jq -r '.[] | select(.name=="snapify") | "Name: \(.name), Status: \(.pm2_env.status), CPU: \(.monit.cpu)%, Memory: \(.monit.memory)MB"'
-
-    - name: Notify deployment success
-      uses: 8398a7/action-slack@v3
-      if: success()
-      with:
-        status: success
-        text: "🚀 SnapifY production deployment successful - Version ${{ github.sha }}"
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
-    - name: Notify deployment failure
-      uses: 8398a7/action-slack@v3
-      if: failure()
-      with:
-        status: failure
-        text: "💥 SnapifY production deployment failed - Manual intervention required"
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
