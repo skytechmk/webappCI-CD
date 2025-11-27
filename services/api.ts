@@ -1,6 +1,6 @@
 import { User, Event, MediaItem, GuestbookEntry, Comment, Vendor } from '../types';
 
-const API_URL = import.meta.env.DEV ? (import.meta.env.VITE_API_URL || 'http://localhost:3001') : '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const getAuthHeaders = () => {
     const token = localStorage.getItem('snapify_token');
@@ -10,7 +10,7 @@ const getAuthHeaders = () => {
 export const api = {
     // ... existing methods (User, Auth, etc.) ...
     fetchUsers: async (): Promise<User[]> => {
-        const res = await fetch(`${API_URL}/api/users`, { headers: { ...getAuthHeaders() } });
+        const res = await fetch(`${API_URL}/api/users?_t=${Date.now()}`, { headers: { ...getAuthHeaders() } });
         return res.json();
     },
     
@@ -64,7 +64,7 @@ export const api = {
 
     // --- EVENTS ---
     fetchEvents: async (): Promise<Event[]> => {
-        const res = await fetch(`${API_URL}/api/events`, { headers: { ...getAuthHeaders() } });
+        const res = await fetch(`${API_URL}/api/events?_t=${Date.now()}`, { headers: { ...getAuthHeaders() } });
         if (!res.ok) return [];
         const data = await res.json();
         return data.map((e: any) => ({
@@ -72,9 +72,9 @@ export const api = {
             media: e.media.map((m: any) => ({ ...m, isWatermarked: !!m.isWatermarked }))
         }));
     },
-    
+
     fetchEventById: async (eventId: string): Promise<Event> => {
-        const res = await fetch(`${API_URL}/api/events/${eventId}`);
+        const res = await fetch(`${API_URL}/api/events/${eventId}?_t=${Date.now()}`);
         if (!res.ok) throw new Error(`Failed to fetch event`);
         const data = await res.json();
         return {
@@ -247,14 +247,6 @@ Example structure:
         return res.json();
     },
     
-    resetSystem: async (): Promise<void> => {
-        const res = await fetch(`${API_URL}/api/admin/reset`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-            body: JSON.stringify({ confirmation: 'RESET_CONFIRM' })
-        });
-        if (!res.ok) throw new Error("Failed to reset system");
-    },
 
     getSystemStorage: async (): Promise<{
         system: { filesystem: string; size: string; used: string; available: string; usePercent: string };

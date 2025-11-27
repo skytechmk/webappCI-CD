@@ -73,7 +73,7 @@ export const getStoredDeviceFingerprint = (): { fingerprint: string; userId: str
       return JSON.parse(stored);
     }
   } catch (error) {
-    console.error('Error reading device fingerprint:', error);
+    // Error reading device fingerprint - continue silently
   }
   return null;
 };

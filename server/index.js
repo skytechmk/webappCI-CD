@@ -28,13 +28,12 @@ const __dirname = path.dirname(__filename);
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 3001;
 
-if (process.env.NODE_ENV === 'production') {
-    const requiredVars = ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'JWT_SECRET'];
-    const missing = requiredVars.filter(key => !process.env[key]);
-    if (missing.length > 0) {
-        console.error(`FATAL: Missing required environment variables in production: ${missing.join(', ')}`);
-        process.exit(1);
-    }
+// Production-only execution - no development fallbacks
+const requiredVars = ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'JWT_SECRET'];
+const missing = requiredVars.filter(key => !process.env[key]);
+if (missing.length > 0) {
+    console.error(`FATAL: Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
 }
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@skytech.mk';
@@ -59,9 +58,7 @@ const emailTransporter = nodemailer.createTransport({
     } : undefined
 });
 
-const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
-    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://snapify.skytech.mk'])
-    : (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*');
+const ALLOWED_ORIGINS = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://snapify.skytech.mk'];
 
 // MinIO / S3 Config
 const S3_ENDPOINT = process.env.S3_ENDPOINT || 'http://192.168.20.153:9000';
@@ -344,6 +341,20 @@ io.on('connection', (socket) => {
         } catch (e) { console.error("Unauthorized reload attempt"); }
     });
 
+    socket.on('admin_force_refresh', (token) => {
+        try {
+            const user = jwt.verify(token, JWT_SECRET);
+            if (user.role === 'ADMIN') {
+                // Force all clients to refresh their data
+                io.emit('cache_invalidate', {
+                    type: 'force_refresh',
+                    timestamp: Date.now(),
+                    message: 'Admin triggered data refresh.'
+                });
+            }
+        } catch (e) { console.error("Unauthorized refresh attempt"); }
+    });
+
     socket.on('disconnect', () => {
         if (currentUser && currentUser.role === 'ADMIN') {
             // Mark admin as offline but keep record for some time
@@ -386,7 +397,14 @@ async function attachPublicUrls(mediaList) {
     }));
 }
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.get('/api/health', (req, res) => {
+    res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    });
+    res.json({ status: 'ok', uptime: process.uptime() });
+});
 
 // --- AUTH ROUTES ---
 app.post('/api/auth/login', async (req, res) => {
@@ -434,41 +452,16 @@ app.post('/api/auth/google', async (req, res) => {
     } catch (error) { return res.status(401).json({ error: "Google authentication failed" }); }
 });
 
-// --- ADMIN RESET ---
-app.post('/api/admin/reset', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: "Unauthorized" });
-
-    // SECURITY FIX: Disable in production
-    if (process.env.NODE_ENV === 'production') {
-        return res.status(403).json({ error: "System reset is disabled in production." });
-    }
-
-    const { confirmation } = req.body;
-    if (confirmation !== 'RESET_CONFIRM') return res.status(400).json({ error: "Invalid code" });
-
-    try {
-        db.serialize(async () => {
-            db.run("DELETE FROM comments");
-            db.run("DELETE FROM guestbook");
-            db.run("DELETE FROM media");
-            db.run("DELETE FROM events");
-            db.run("DELETE FROM vendors");
-            db.run("DELETE FROM users");
-            const adminId = 'admin-system-id';
-            const hashedAdminPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
-            db.run(`INSERT OR IGNORE INTO users (id, name, email, password, role, tier, storageUsedMb, storageLimitMb, joinedDate, studioName)
-                    VALUES (?, ?, ?, ?, 'ADMIN', 'STUDIO', 0, -1, ?, 'System Root')`,
-                    [adminId, 'System Admin', ADMIN_EMAIL, hashedAdminPassword, new Date().toISOString()]);
-        });
-        fs.readdir(uploadDir, (err, files) => {
-            if (!err) { for (const file of files) fs.unlink(path.join(uploadDir, file), () => {}); }
-        });
-        res.json({ success: true });
-    } catch (error) { res.status(500).json({ error: "Reset Error" }); }
-});
 
 // --- EVENTS ---
 app.get('/api/events', authenticateToken, (req, res) => {
+    // Add cache-busting headers for dynamic data
+    res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    });
+
     const query = req.user.role === 'ADMIN'
         ? `SELECT events.*, users.tier as hostTier FROM events JOIN users ON events.hostId = users.id`
         : `SELECT events.*, users.tier as hostTier FROM events JOIN users ON events.hostId = users.id WHERE events.hostId = ?`;
@@ -490,6 +483,13 @@ app.get('/api/events', authenticateToken, (req, res) => {
 });
 
 app.get('/api/events/:id', async (req, res) => {
+    // Add cache-busting headers for dynamic event data
+    res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    });
+
     db.get(`SELECT events.*, users.tier as hostTier FROM events JOIN users ON events.hostId = users.id WHERE events.id = ?`, [req.params.id], async (err, evt) => {
         if (err || !evt) return res.status(404).json({ error: "Not found" });
         // Check if event has expired

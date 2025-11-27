@@ -32,7 +32,7 @@ export const getGPSFromImage = (file: File): Promise<{ lat: number, lng: number 
                 }
             });
         } catch (e) {
-            console.warn("EXIF extraction failed", e);
+            // EXIF extraction failed - continue silently
             resolve(null);
         }
     });
@@ -206,7 +206,7 @@ export const createPhotoStrip = async (images: string[], footerText: string = "S
 
         return canvas.toDataURL('image/jpeg', 0.95);
     } catch (e) {
-        console.error("Error generating photostrip", e);
+        // Error generating photostrip - return first image as fallback
         return images[0]; // Fallback
     }
 };

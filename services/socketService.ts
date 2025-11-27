@@ -25,7 +25,7 @@ class SocketService {
       });
   
       this.socket.on('connect', () => {
-        console.log('Connected to Socket.io server at', API_URL);
+        // Connected to Socket.io server
         // Authenticate if we have a token
         if (userToken) {
           this.socket?.emit('authenticate', userToken);
@@ -33,7 +33,7 @@ class SocketService {
       });
   
       this.socket.on('disconnect', (reason) => {
-        console.log('Socket disconnected:', reason);
+        // Socket disconnected
         // Don't auto-reconnect on mobile if user navigated away
         if (reason === 'io client disconnect' || document.hidden) {
           this.socket = null;
@@ -41,7 +41,7 @@ class SocketService {
       });
   
       this.socket.on('connect_error', (error) => {
-        console.warn('Socket connection error:', error);
+        // Socket connection error - continue silently
       });
     }
 

@@ -19,7 +19,7 @@ export const getUserLocation = async (): Promise<GeolocationData | null> => {
       region: data.region
     };
   } catch (error) {
-    console.warn('Failed to get user location:', error);
+    // Location access failed - return null
     return null;
   }
 };

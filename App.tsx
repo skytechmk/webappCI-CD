@@ -25,20 +25,15 @@ import { SupportChat } from './components/SupportChat';
 import { applyWatermark } from './utils/imageProcessing';
 import { clearDeviceFingerprint } from './utils/deviceFingerprint';
 import { socketService } from './services/socketService';
+import { validateGuestName, sanitizeInput, validateEmail, validatePassword, validateEventTitle, validateEventDescription } from './utils/validation';
+import { clearAllCaches } from './utils/cacheManager';
 
 // @ts-ignore
 const env: any = (import.meta as any).env || {};
 
 const API_URL = import.meta.env.DEV ? (import.meta.env.VITE_API_URL || 'http://localhost:3001') : '';
 
-const validateEmail = (email: string): boolean => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-};
-
-const sanitizeInput = (input: string): string => {
-  return input.replace(/[<>]/g, '').trim();
-};
+// Using imported validation functions from utils/validation.ts
 
 const safeSetItem = (key: string, value: string) => {
   try { localStorage.setItem(key, value); } catch (error) { console.warn('Failed to save to localStorage:', error); }
@@ -153,6 +148,36 @@ export default function App() {
 
        socketService.on('admin_status_update', handleAdminStatusUpdate);
 
+       // CACHE INVALIDATION: Listen for cache invalidation events
+       const handleCacheInvalidate = async (data: any) => {
+         console.log('Cache invalidation received:', data);
+
+         if (data.type === 'full_reset') {
+           // Clear all caches and reload everything
+           await clearAllCaches({
+             clearLocalStorage: true,
+             clearServiceWorker: true
+           });
+           // Clear React state
+           setEvents([]);
+           setCurrentEventId(null);
+           setCurrentUser(null);
+           setAllUsers([]);
+           setGuestName('');
+           // Reload initial data
+           loadInitialData();
+         } else if (data.type === 'force_refresh') {
+           // Clear service worker caches and refresh data
+           await clearAllCaches({
+             clearServiceWorker: true
+           });
+           console.log('Admin triggered data refresh');
+           loadInitialData();
+         }
+       };
+
+       socketService.on('cache_invalidate', handleCacheInvalidate);
+
        // Load initial admin status
        const loadAdminStatus = async () => {
          try {
@@ -170,6 +195,7 @@ export default function App() {
          document.removeEventListener('visibilitychange', handleVisibilityChange);
          socketService.off('force_client_reload', handleForceReload);
          socketService.off('admin_status_update', handleAdminStatusUpdate);
+         socketService.off('cache_invalidate', handleCacheInvalidate);
        };
    }, []);
 
@@ -359,10 +385,11 @@ export default function App() {
         const { email, password, name, isPhotographer, studioName } = data;
         if (!email || !password) return setAuthError(t('authErrorRequired'));
         if (!validateEmail(email)) return setAuthError(t('authErrorInvalidEmail'));
-        if (password.length < 6) return setAuthError(t('authErrorPasswordLength'));
+        if (!validatePassword(password)) return setAuthError(t('authErrorPasswordLength'));
         if (isSignUp) {
-            if (!name || name.trim().length < 2) return setAuthError(t('authErrorNameRequired'));
+            if (!name || !validateGuestName(name)) return setAuthError(t('authErrorNameRequired'));
             const sanitizedName = sanitizeInput(name);
+            const sanitizedStudioName = isPhotographer && studioName ? sanitizeInput(studioName) : undefined;
             const newUser: User = {
                 id: `user-${Date.now()}`,
                 name: sanitizedName,
@@ -372,7 +399,7 @@ export default function App() {
                 storageUsedMb: 0,
                 storageLimitMb: 100,
                 joinedDate: new Date().toISOString().split('T')[0],
-                studioName: isPhotographer ? sanitizeInput(studioName) : undefined
+                studioName: sanitizedStudioName
             };
             const res = await api.createUser(newUser);
             await finalizeLogin(res.user, res.token);
@@ -384,8 +411,13 @@ export default function App() {
   };
 
   const handleGuestLogin = (name: string) => {
-    setGuestName(name);
-    safeSetItem('snapify_guest_name', name);
+    if (!validateGuestName(name)) {
+      alert(t('authErrorNameRequired'));
+      return;
+    }
+    const sanitizedName = sanitizeInput(name);
+    setGuestName(sanitizedName);
+    safeSetItem('snapify_guest_name', sanitizedName);
     setShowGuestLogin(false);
     if (currentEventId) setView('event');
     if (pendingAction === 'camera') cameraInputRef.current?.click();
@@ -401,6 +433,17 @@ export default function App() {
   const handleCreateEvent = async (data: any) => {
     if (!currentUser) return;
     const { title, date, theme, description, pin, adminOptions } = data;
+
+    // Validate input
+    if (!validateEventTitle(title)) {
+      alert("Event title must be 1-100 characters long");
+      return;
+    }
+    if (!validateEventDescription(description)) {
+      alert("Event description must be less than 500 characters");
+      return;
+    }
+
     let expiresAt: string | null = null;
     const now = new Date().getTime();
 

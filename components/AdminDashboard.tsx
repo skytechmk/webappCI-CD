@@ -68,7 +68,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   
   // Modal/Action State
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
-  const [isResetting, setIsResetting] = useState(false);
 
   // System Storage State
   const [systemStorage, setSystemStorage] = useState<{
@@ -114,7 +113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           const data = await api.getSystemStorage();
           setSystemStorage(data);
         } catch (error) {
-          console.error('Failed to fetch storage data:', error);
+          // Storage data fetch failed - continue silently
         } finally {
           setStorageLoading(false);
         }
@@ -249,33 +248,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   };
 
-  const promptResetSystem = () => {
-      setDeleteConfirmation({
-          isOpen: true,
-          type: 'system',
-          id: 'system-reset',
-          title: '⚠️ DANGER: RESET SYSTEM',
-          message: 'Are you absolutely sure? This will WIPE ALL DATA (Users, Events, Photos, Videos) from the database and storage. This action cannot be undone. You will be logged out.'
-      });
-  };
 
   const executeDelete = async () => {
     if (!deleteConfirmation) return;
     const { type, id, parentId } = deleteConfirmation;
-    
-    if (type === 'system') {
-        setIsResetting(true);
-        try {
-            await api.resetSystem();
-            alert("System reset successful. Refreshing...");
-            onLogout();
-            window.location.reload();
-        } catch (error: any) {
-            alert("Failed to reset system: " + (error.message || error));
-            setIsResetting(false);
-        }
-        return;
-    }
 
     if (type === 'user') {
       onDeleteUser(id);
@@ -510,7 +486,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           const messages = await api.getSupportMessages();
           setSupportMessages(messages);
         } catch (error) {
-          console.error('Failed to load support messages:', error);
+          // Support messages load failed - continue silently
         }
       };
       loadSupportMessages();
@@ -569,7 +545,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         await api.sendAdminReply(selectedUserId, newReply.trim());
         setNewReply('');
       } catch (error) {
-        console.error('Failed to send reply:', error);
+        // Reply send failed - continue silently
       } finally {
         setIsReplying(false);
       }
@@ -584,7 +560,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )
         );
       } catch (error) {
-        console.error('Failed to mark message as read:', error);
+        // Mark as read failed - continue silently
       }
     };
 
@@ -791,29 +767,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
                       </div>
 
-                      {/* Reset Card */}
-                      <div className="border border-red-200 rounded-2xl p-8 bg-red-50/50 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-4 opacity-10">
-                              <AlertTriangle size={120} className="text-red-500" />
-                          </div>
-                          <div className="relative z-10">
-                              <h4 className="text-xl font-bold text-red-900 mb-2 flex items-center gap-2">
-                                  <Trash2 size={20}/> Danger Zone
-                              </h4>
-                              <p className="text-sm text-red-700 mb-6 max-w-xl leading-relaxed">
-                                  Performs a hard reset of the entire SnapifY instance. This action will irreversibly delete
-                                  <strong> ALL</strong> users, events, photos, videos, and comments from the database and clear
-                                  all files from storage.
-                              </p>
-                              <button
-                                  onClick={promptResetSystem}
-                                  className="py-3 px-6 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-500/20 flex items-center gap-2"
-                              >
-                                  <ShieldAlert size={18} />
-                                  Reset System Database
-                              </button>
-                          </div>
-                      </div>
                   </div>
               </div>
           </div>
@@ -1383,8 +1336,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="flex gap-3">
               <button onClick={() => setDeleteConfirmation(null)} className="flex-1 py-3.5 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors">Cancel</button>
               <button onClick={executeDelete} className="flex-1 py-3.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-red-500/20">
-                  {isResetting ? <span className="animate-spin border-2 border-white/30 border-t-white rounded-full w-5 h-5"></span> : <Trash2 size={18} />}
-                  {deleteConfirmation.type === 'system' ? 'CONFIRM RESET' : 'Delete'}
+                  <Trash2 size={18} />
+                  Delete
               </button>
             </div>
           </div>
@@ -1460,7 +1413,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       setSelectedNotification(null);
                       alert('User upgraded successfully!');
                     } catch (error) {
-                      console.error('Failed to upgrade user:', error);
+                      // User upgrade failed - show alert
                       alert('Failed to upgrade user. Please try again.');
                     }
                   }}

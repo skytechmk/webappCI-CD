@@ -48,7 +48,7 @@ export class OllamaService {
       });
       return response.ok;
     } catch (error) {
-      console.warn('Ollama service not available:', error);
+      // Ollama service not available
       return false;
     }
   }
@@ -71,7 +71,7 @@ export class OllamaService {
       
       return response || (t ? t('defaultCaption') : 'Event memory');
     } catch (error) {
-      console.warn('Ollama caption generation failed:', error);
+      // Ollama caption generation failed
       return t ? t('defaultCaption') : 'Event memory';
     }
   }
@@ -90,7 +90,7 @@ export class OllamaService {
       
       return response || `Join us for ${title} on ${date}!`;
     } catch (error) {
-      console.warn('Ollama description generation failed:', error);
+      // Ollama description generation failed
       return `Join us for ${title} on ${date}!`;
     }
   }
@@ -136,7 +136,7 @@ export class OllamaService {
       
       throw new Error(`Ollama API error: ${response.status}`);
     } catch (error) {
-      console.warn('Ollama text generation failed:', error);
+      // Ollama text generation failed
       throw error;
     }
   }
@@ -153,7 +153,7 @@ export class OllamaService {
       }
       return [];
     } catch (error) {
-      console.warn('Failed to fetch Ollama models:', error);
+      // Failed to fetch Ollama models
       return [];
     }
   }

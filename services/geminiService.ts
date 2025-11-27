@@ -14,18 +14,18 @@ export const generateEventDescription = async (title: string, date: string, type
   // 1. Try Ollama first (Local AI)
   try {
     if (await isOllamaAvailable()) {
-      console.log("Using Ollama for event description...");
+      // Using Ollama for event description
       return await generateEventDescriptionWithOllama(title, date, type);
     }
   } catch (error) {
-    console.warn("Ollama unavailable, falling back to Cloud AI.");
+    // Ollama unavailable, falling back to Cloud AI
   }
 
   // 2. Fallback to Backend API (Cloud AI / Gemini)
   try {
     return await api.generateEventDescription(title, date, type);
   } catch (error) {
-    console.warn("AI Generation failed, falling back to default.");
+    // AI Generation failed, falling back to default
     return "Join us for an amazing celebration!";
   }
 };
@@ -38,18 +38,18 @@ export const generateImageCaption = async (base64Image: string): Promise<string>
   // 1. Try Ollama first (Local AI)
   try {
     if (await isOllamaAvailable()) {
-      console.log("Using Ollama for image caption...");
+      // Using Ollama for image caption
       return await generateImageCaptionWithOllama(base64Image);
     }
   } catch (error) {
-    console.warn("Ollama unavailable, falling back to Cloud AI.");
+    // Ollama unavailable, falling back to Cloud AI
   }
 
   // 2. Fallback to Backend API (Cloud AI / Gemini)
   try {
     return await api.generateImageCaption(base64Image);
   } catch (error) {
-    console.warn("AI Caption failed, falling back to default.");
+    // AI Caption failed, falling back to default
     return "Captured moment";
   }
 };
