@@ -53,12 +53,15 @@ jobs:
         cp nginx.conf deploy/
         cd deploy && tar -czf ../snapify-prod-${{ github.sha }}.tar.gz .
 
+    - name: Create deployment directory
+      run: |
+        sudo mkdir -p /var/www/snapify
+        sudo chown -R $USER:$USER /var/www/snapify
+        ls -la /var/www/ | grep snapify
+
     - name: Deploy to production (local)
       run: |
         # SnapifY Production Deployment (Local)
-
-        # Ensure deployment directory exists and navigate to it
-        mkdir -p /var/www/snapify
         cd /var/www/snapify
 
         echo "🚀 Starting production deployment of SnapifY version ${{ github.sha }}"
