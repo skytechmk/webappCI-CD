@@ -45,7 +45,7 @@ jobs:
         cp -r dist deploy/
         cp -r server deploy/
         cp package.json deploy/
-        cp ecosystem.config.cjs deploy/
+        cp ecosystem.config.js deploy/
         cp nginx.conf deploy/
         cd deploy && tar -czf ../snapify-prod-${{ github.sha }}.tar.gz .
 
@@ -64,7 +64,7 @@ jobs:
         if [ -d "dist" ]; then cp -r dist "$BACKUP_DIR/"; fi
         if [ -d "server" ]; then cp -r server "$BACKUP_DIR/"; fi
         if [ -f "package.json" ]; then cp package.json "$BACKUP_DIR/"; fi
-        if [ -f "ecosystem.config.cjs" ]; then cp ecosystem.config.cjs "$BACKUP_DIR/"; fi
+        if [ -f "ecosystem.config.js" ]; then cp ecosystem.config.js "$BACKUP_DIR/"; fi
         if [ -f "snapify.db" ]; then cp snapify.db "$BACKUP_DIR/"; fi
         if [ -f ".env" ]; then cp .env "$BACKUP_DIR/"; fi
 
@@ -87,7 +87,7 @@ jobs:
 
         # Start application with PM2
         echo "▶️ Starting application..."
-        pm2 start ecosystem.config.cjs --env production
+        pm2 start ecosystem.config.js --env production
 
         # Save PM2 configuration
         pm2 save
@@ -115,13 +115,13 @@ jobs:
               # Rollback logic
               if [ -d "$BACKUP_DIR" ]; then
                 echo "🔄 Rolling back to previous version..."
-                rm -rf dist server package.json ecosystem.config.cjs 2>/dev/null || true
+                rm -rf dist server package.json ecosystem.config.js 2>/dev/null || true
                 cp -r "$BACKUP_DIR"/* ./
 
                 # Restart with backup version
                 pm2 stop snapify 2>/dev/null || true
                 pm2 delete snapify 2>/dev/null || true
-                pm2 start ecosystem.config.cjs --env production
+                pm2 start ecosystem.config.js --env production
                 pm2 save
 
                 sleep 15
