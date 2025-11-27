@@ -1,4 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer
+} from 'recharts';
 import { User, UserRole, TierLevel, Event, TranslateFn, MediaItem, TIER_CONFIG } from '../types';
 import { Trash2, HardDrive, Zap, Calendar, Image as ImageIcon, X, Clock, Eye, Plus, Edit, Save, Camera, Briefcase, AlertTriangle, ZoomIn, Download, Lock, ArrowLeft, LogOut, Mail, Building, ShieldAlert, Users, LayoutGrid, Settings, Crown, Star, RefreshCw, Bell, Check, MessageCircle, Send } from 'lucide-react';
 import { api } from '../services/api';
@@ -1084,13 +1093,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {/* Storage Chart */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
                     <h3 className="text-lg font-bold text-slate-900 mb-6">{t('storageUsage')}</h3>
-                    <div className="flex-1 min-h-[300px] flex items-center justify-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
-                        <div className="text-center text-slate-500">
-                            <HardDrive size={48} className="mx-auto mb-4 text-slate-300" />
-                            <p className="font-bold text-lg mb-2">Storage Chart</p>
-                            <p className="text-sm">Chart temporarily disabled</p>
-                            <p className="text-xs mt-2">Will be restored after deployment</p>
-                        </div>
+                    <div className="flex-1 min-h-[300px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={storageData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                            <XAxis type="number" hide />
+                            <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 12}} />
+                            <Tooltip
+                                cursor={{fill: '#f8fafc'}}
+                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            />
+                            <Bar dataKey="used" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20} name="Used (MB)" />
+                        </BarChart>
+                        </ResponsiveContainer>
                     </div>
                 </div>
             </div>
