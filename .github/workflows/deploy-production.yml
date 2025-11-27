@@ -30,9 +30,12 @@ jobs:
 
     - name: Install dependencies
       run: |
+        # Complete clean install
         npm cache clean --force
-        rm -rf node_modules package-lock.json
+        rm -rf node_modules package-lock.json .npm
         npm install --legacy-peer-deps
+        # Verify react-is is installed
+        npm list react-is || npm install react-is@^18.3.1
 
     # - name: Run tests
     #   run: npm run test
