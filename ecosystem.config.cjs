@@ -17,6 +17,10 @@ module.exports = {
     // Environment variables will be loaded from .env file
     env_production: {
       NODE_ENV: 'production'
+    },
+    env_staging: {
+      NODE_ENV: 'staging',
+      PORT: 3002
     }
   }]
 };
