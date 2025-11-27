@@ -56,6 +56,13 @@ jobs:
     - name: Deploy to production (local)
       run: |
         # SnapifY Production Deployment (Local)
+
+        # Ensure deployment directory exists
+        if [ ! -d /var/www/snapify ]; then
+          mkdir -p /var/www/snapify
+          echo "Created /var/www/snapify directory."
+        fi
+
         cd /var/www/snapify
 
         echo "🚀 Starting production deployment of SnapifY version ${{ github.sha }}"
