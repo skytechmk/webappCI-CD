@@ -68,7 +68,7 @@ jobs:
 
         # Create timestamped backup in /var/www/backups
         BACKUP_DIR="/var/www/backups/snapify_prod_backup_$(date +%Y%m%d_%H%M%S)"
-        mkdir -p /var/www/backups
+        echo "jarvis" | sudo -S mkdir -p /var/www/backups
 
         echo "📦 Creating backup..."
         if [ -d "dist" ]; then cp -r dist "$BACKUP_DIR/"; fi
@@ -157,7 +157,7 @@ jobs:
 
         # Reload nginx to pick up any changes
         echo "🔄 Reloading nginx..."
-        sudo systemctl reload nginx || echo "Warning: nginx reload failed"
+        echo "jarvis" | sudo -S systemctl reload nginx || echo "Warning: nginx reload failed"
 
         echo "🎉 Production deployment completed successfully!"
         echo "📊 Application Status:"
